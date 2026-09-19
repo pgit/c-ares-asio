@@ -184,7 +184,9 @@ void AresResolver::startResolve(std::string host, std::string service, ResolveHa
    // whole channel with it. Good enough while queries are issued one at a time.
    //
    if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
-      slot.assign([this](cancellation_type) { ares_cancel(m_channel); });
+      slot.assign([this](cancellation_type) { //
+         ares_cancel(m_channel);
+      });
 
    auto request = std::make_unique<Request>(m_executor, std::move(handler));
 

@@ -61,8 +61,10 @@ public:
    {
       return boost::asio::async_initiate<CompletionToken, Signature>(
          [this](ResolveHandler handler, std::string host, std::string service)
-      { startResolve(std::move(host), std::move(service), std::move(handler)); }, //
-         token, std::string(host), std::string(service));
+      { //
+         startResolve(std::move(host), std::move(service), std::move(handler));
+      },
+      token, std::string(host), std::string(service));
    }
 
 private:
