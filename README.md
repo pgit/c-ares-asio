@@ -38,6 +38,11 @@ Besides the addresses, every name is also looked up for its HTTPS record
 which protocols an endpoint speaks before it connects. The two lookups are independent, so a name
 that has no addresses is still asked for its record.
 
+The one exception is a name that cannot be encoded as a DNS name at all, which is no question for
+any record type. Those are skipped rather than asked, because `ares_search_dnsrec()` answers them
+with `ARES_ENOMEM` (c-ares 1.34.5, where `ares_getaddrinfo()` correctly says `ARES_EBADNAME`) --
+asking would print a second line blaming memory for a typo.
+
 c-ares parses these itself: `ares_search_dnsrec()` asks the question the same way
 `ares_getaddrinfo()` does, search domains and all, and the answer comes back as an
 `ares_dns_record_t` rather than as bytes. The priority and target come straight off it, but the

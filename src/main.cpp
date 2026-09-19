@@ -210,6 +210,14 @@ awaitable<void> resolveWithAres(const Config& config)
       // Independent of the addresses, and asked even when those did not come: a name can carry an
       // HTTPS record that points the client somewhere else entirely.
       //
+      // A name that cannot be encoded as a DNS name at all is the exception -- there is no
+      // question to ask about it for any record type. Worth skipping rather than asking anyway,
+      // because ares_search_dnsrec() answers that one with ARES_ENOMEM (c-ares 1.34.5), so the
+      // second line would contradict the first and blame memory for a typo.
+      //
+      if (ec == make_ares_error(ARES_EBADNAME))
+         continue;
+
       if (!co_await lookupHttps(resolver, host))
          co_return;
    }
