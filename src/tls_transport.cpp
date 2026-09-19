@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <limits>
@@ -29,11 +30,11 @@ std::string sslError()
    std::string message;
    while (const auto code = ERR_get_error())
    {
-      char buffer[256];
-      ERR_error_string_n(code, buffer, sizeof(buffer));
+      std::array<char, 256> buffer;
+      ERR_error_string_n(code, buffer.data(), buffer.size());
       if (!message.empty())
          message += ", ";
-      message += buffer;
+      message += buffer.data();
    }
 
    return message.empty() ? "no error" : message;
