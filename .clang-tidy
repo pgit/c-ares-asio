@@ -7,7 +7,7 @@ Checks:          'clang-diagnostic-*,clang-analyzer-*,modernize*,performance*,re
 
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
-AnalyzeTemporaryDtors: false
+# AnalyzeTemporaryDtors: false
 FormatStyle:     file
 User:            vscode
 CheckOptions:
