@@ -598,16 +598,18 @@ void AresResolver::arm(const std::shared_ptr<Socket>& socket)
    {
       socket->waitingRead = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_read,
-                                    [this, weak = std::weak_ptr(socket)](const error_code& ec)
-      { onSocketEvent(weak, ARES_FD_EVENT_READ, ec); });
+                                    [this, weak = std::weak_ptr(socket)](const error_code& ec) { //
+         onSocketEvent(weak, ARES_FD_EVENT_READ, ec);
+      });
    }
 
    if (wantWrite && !socket->waitingWrite)
    {
       socket->waitingWrite = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_write,
-                                    [this, weak = std::weak_ptr(socket)](const error_code& ec)
-      { onSocketEvent(weak, ARES_FD_EVENT_WRITE, ec); });
+                                    [this, weak = std::weak_ptr(socket)](const error_code& ec) { //
+         onSocketEvent(weak, ARES_FD_EVENT_WRITE, ec);
+      });
    }
 }
 
