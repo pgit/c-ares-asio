@@ -1,7 +1,5 @@
 #include "utils.hpp"
 
-#include <boost/asio/ip/tcp.hpp>
-
 // =================================================================================================
 
 #if defined(GITHUB_ACTIONS) || defined(NDEBUG)
