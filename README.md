@@ -28,6 +28,13 @@ Cancellation works too (`Ctrl-C` interrupts a lookup cleanly), but only bluntly:
 handle for an individual `ares_getaddrinfo()` request, so the cancellation slot calls
 `ares_cancel()`, which takes every pending query on the channel with it.
 
+That puts some weight on `ares_cancel()`, which is worth knowing about:
+[GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542)
+is a use-after-free/double-free in c-ares' query-completion handling, where a query's callback
+runs while the query is still linked into the channel, and one of the two documented triggers is
+an application calling `ares_cancel()`. It affects everything after 1.32.3 and is fixed in
+**1.34.7** -- the devcontainer currently installs Debian's `libcares2`, which is 1.34.5.
+
 Not done yet: batching several ready descriptors into a single `ares_process_fds()` call -- ASIO
 delivers one completion handler per descriptor, so each one currently triggers its own call.
 
@@ -35,13 +42,20 @@ delivers one completion handler per descriptor, so each one currently triggers i
 
 Besides the addresses, every name is also looked up for its HTTPS record
 ([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460), RR type 65) -- the record that tells a client
-which protocols an endpoint speaks before it connects. The two lookups are independent, so a name
-that has no addresses is still asked for its record.
+which protocols an endpoint speaks before it connects.
 
-The one exception is a name that cannot be encoded as a DNS name at all, which is no question for
-any record type. Those are skipped rather than asked, because `ares_search_dnsrec()` answers them
-with `ARES_ENOMEM` (c-ares 1.34.5, where `ares_getaddrinfo()` correctly says `ARES_EBADNAME`) --
-asking would print a second line blaming memory for a typo.
+The addresses and the record are two separate questions, so they go out *together* rather than one
+after the other -- c-ares has no trouble keeping several queries in flight on a channel, so the
+record costs no second round trip, and with `--dot` the two share the connection as well. The
+waiting is an [`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html)
+over the two operations; the printing stays in a fixed order so the output does not depend on
+which answer lands first.
+
+Being separate questions, a name that has no addresses is still asked for its record. The
+exception is a name that cannot be encoded as a DNS name at all, which is no question for any
+record type: c-ares turns that one down locally without a query, but where `ares_getaddrinfo()`
+correctly says `ARES_EBADNAME`, `ares_search_dnsrec()` says `ARES_ENOMEM` (1.34.5) -- so the
+address error is the one reported, rather than a second line blaming memory for a typo.
 
 c-ares parses these itself: `ares_search_dnsrec()` asks the question the same way
 `ares_getaddrinfo()` does, search domains and all, and the answer comes back as an
@@ -52,9 +66,10 @@ each one uses and renders it the way the RFC presents it:
 
 ```sh
 $ build/src/resolve --server 1.1.1.1 cloudflare.com
-14:20:46.175 info cloudflare.com: 104.16.133.229
+info cloudflare.com: 104.16.132.229
+info cloudflare.com: 2606:4700::6810:84e5
 ...
-14:20:46.192 info cloudflare.com: HTTPS 1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5
+info cloudflare.com: HTTPS 1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5
 ```
 
 A name with no such record says so at `--verbose` and is otherwise quiet, which is the common

@@ -9,6 +9,8 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/deferred.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -152,19 +154,45 @@ awaitable<void> resolveWithAsio(const Config& config)
 }
 
 //
-// The HTTPS record (RFC 9460) that goes with the addresses, printed the way dig shows it:
-// priority, target, and then the SvcParams. Most names have none, which is not a problem.
+// Everything asked about one name. The addresses and the HTTPS record (RFC 9460) are two separate
+// questions, so they go out together rather than one after the other -- c-ares has no trouble
+// keeping several queries in flight on a channel, and with --dot they share the connection as
+// well as the round trip.
 //
-awaitable<bool> lookupHttps(AresResolver& resolver, const std::string& host)
+// Returns false when the lookup was cancelled and the caller should stop.
+//
+awaitable<bool> resolveHost(AresResolver& resolver, const Config& config, const std::string& host)
 {
-   auto [ec, records] = co_await resolver.async_lookupHttps(host, as_tuple);
-   if (ec == error::operation_aborted)
+   spdlog::debug("resolving {}:{}...", host, config.service);
+
+   auto [order, ec, endpoints, httpsEc, records] =
+      co_await experimental::make_parallel_group(
+         resolver.async_resolve(host, config.service, deferred),
+         resolver.async_lookupHttps(host, deferred))
+         .async_wait(experimental::wait_for_all(), use_awaitable);
+
+   if (ec == error::operation_aborted || httpsEc == error::operation_aborted)
       co_return false;
 
-   if (ec == make_ares_error(ARES_ENODATA) || ec == make_ares_error(ARES_ENOTFOUND))
-      spdlog::debug("{}: no HTTPS record", host);
-   else if (ec)
-      spdlog::warn("{}: HTTPS: {}", host, ec.message());
+   if (ec)
+      spdlog::error("{}: {}", host, ec.message());
+
+   for (const auto& endpoint : endpoints)
+      spdlog::info("{}: {}", host, endpoint.address().to_string());
+
+   //
+   // A name that cannot be encoded as a DNS name at all is no question for any record type, and
+   // c-ares turns that one down locally, without a query. But where ares_getaddrinfo() says
+   // ARES_EBADNAME, ares_search_dnsrec() says ARES_ENOMEM (c-ares 1.34.5), so the address error
+   // is the one to believe and repeating it as a memory problem would only mislead.
+   //
+   if (ec != make_ares_error(ARES_EBADNAME))
+   {
+      if (httpsEc == make_ares_error(ARES_ENODATA) || httpsEc == make_ares_error(ARES_ENOTFOUND))
+         spdlog::debug("{}: no HTTPS record", host);
+      else if (httpsEc)
+         spdlog::warn("{}: HTTPS: {}", host, httpsEc.message());
+   }
 
    for (const auto& record : records)
    {
@@ -194,33 +222,8 @@ awaitable<void> resolveWithAres(const Config& config)
    }
 
    for (const auto& host : config.hosts)
-   {
-      spdlog::debug("resolving {}:{}...", host, config.service);
-      auto [ec, endpoints] = co_await resolver.async_resolve(host, config.service, as_tuple);
-      if (ec == error::operation_aborted)
+      if (!co_await resolveHost(resolver, config, host))
          co_return;
-
-      if (ec)
-         spdlog::error("{}: {}", host, ec.message());
-
-      for (const auto& endpoint : endpoints)
-         spdlog::info("{}: {}", host, endpoint.address().to_string());
-
-      //
-      // Independent of the addresses, and asked even when those did not come: a name can carry an
-      // HTTPS record that points the client somewhere else entirely.
-      //
-      // A name that cannot be encoded as a DNS name at all is the exception -- there is no
-      // question to ask about it for any record type. Worth skipping rather than asking anyway,
-      // because ares_search_dnsrec() answers that one with ARES_ENOMEM (c-ares 1.34.5), so the
-      // second line would contradict the first and blame memory for a typo.
-      //
-      if (ec == make_ares_error(ARES_EBADNAME))
-         continue;
-
-      if (!co_await lookupHttps(resolver, host))
-         co_return;
-   }
 }
 
 int main(int argc, char* argv[])
