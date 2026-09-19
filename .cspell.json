@@ -1,14 +1,26 @@
 {
     "words": [
-        "ASIO",
         "addrinfo",
         "ares",
+        "ASIO",
+        "CANONNAME",
+        "cares",
         "coro",
+        "csv",
+        "EDESTRUCTION",
         "Eisenlohr",
+        "ENOMEM",
         "epoll",
+        "freeaddrinfo",
+        "getaddrinfo",
         "IWYU",
         "multitoken",
-        "spdlog"
+        "nevents",
+        "ntohs",
+        "resolv",
+        "sockaddr",
+        "spdlog",
+        "strerror"
     ],
     "ignorePaths": [
         ".devcontainer/*",

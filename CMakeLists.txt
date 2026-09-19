@@ -32,6 +32,9 @@ find_package(Boost 1.88 COMPONENTS program_options REQUIRED)
 find_package(Threads REQUIRED)
 find_package(spdlog REQUIRED)
 
+# ares_process_fds() was added in 1.34
+find_package(c-ares 1.34 CONFIG REQUIRED)
+
 # --------------------------------------------------------------------------------------------------
 
 add_subdirectory(src)

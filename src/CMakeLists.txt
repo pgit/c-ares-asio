@@ -1,5 +1,6 @@
 add_executable(resolve)
-target_sources(resolve PRIVATE "main.cpp")
+target_sources(resolve PRIVATE "main.cpp" "ares_resolver.cpp" "utils.cpp")
 target_link_libraries(resolve PRIVATE Threads::Threads)
 target_link_libraries(resolve PRIVATE Boost::program_options)
 target_link_libraries(resolve PRIVATE spdlog::spdlog_header_only)
+target_link_libraries(resolve PRIVATE c-ares::cares)
