@@ -1,0 +1,17 @@
+{
+    "words": [
+        "ASIO",
+        "addrinfo",
+        "ares",
+        "coro",
+        "Eisenlohr",
+        "epoll",
+        "IWYU",
+        "multitoken",
+        "spdlog"
+    ],
+    "ignorePaths": [
+        ".devcontainer/*",
+        "**/CMakeLists.txt"
+    ]
+}

@@ -1,0 +1,5 @@
+add_executable(resolve)
+target_sources(resolve PRIVATE "main.cpp")
+target_link_libraries(resolve PRIVATE Threads::Threads)
+target_link_libraries(resolve PRIVATE Boost::program_options)
+target_link_libraries(resolve PRIVATE spdlog::spdlog_header_only)

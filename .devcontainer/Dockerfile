@@ -1,0 +1,50 @@
+#
+# Toolchain base image: clang/libc++, Boost, spdlog and friends, prebuilt and pushed to the HUB so
+# that codespace creation stays fast. It happens to be the dependency image of the 'anyhttp'
+# project, which is where this devcontainer comes from -- nothing of that project itself is in it.
+#
+FROM docker.io/psedoc/anyhttp:0.28
+
+# ==================================================================================================
+
+#
+# install some more interactive utils in the devcontainer
+#
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive && \
+    apt-get -y install iputils-ping tmux btop valgrind && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# ==================================================================================================
+
+#
+# enable persistent bash history in container
+#
+# https://code.visualstudio.com/remote/advancedcontainers/persist-bash-history
+#
+# To actually make it persistent across re-creation of the container, you need to
+# mount a volume to /commandhistory. You can do this in devcontainer.json like this:
+#
+# 	"mounts": [
+# 		"source=cpp-devcontainer-bashhistory,target=/commandhistory,type=volume"
+#   ]
+#
+ARG USERNAME=vscode
+RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
+    && mkdir /commandhistory \
+    && touch /commandhistory/.bash_history \
+    && chown -R $USERNAME /commandhistory \
+    && echo "$SNIPPET" >> "/home/$USERNAME/.bashrc"
+
+RUN echo "export LESS=RS" >/etc/profile.d/less.sh
+
+#
+# Copy .bash_aliases from .devcontainer to user's home
+#
+ARG USERNAME=vscode
+COPY .bash_aliases /home/${USERNAME}/.bash_aliases
+RUN chown $USERNAME:$USERNAME /home/${USERNAME}/.bash_aliases
+
+# --------------------------------------------------------------------------------------------------
+
+SHELL ["/bin/bash", "-c"]
