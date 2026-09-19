@@ -244,8 +244,7 @@ int main(int argc, char* argv[])
    cancellation_signal cancellation;
 
    signal_set signals(context, SIGINT, SIGTERM);
-   signals.async_wait([&](const boost::system::error_code& ec, int signal)
-   {
+   signals.async_wait([&](const boost::system::error_code& ec, int signal) {
       if (ec)
          return;
       spdlog::warn("received signal {}, stopping...", signal);
@@ -253,12 +252,11 @@ int main(int argc, char* argv[])
    });
 
    co_spawn(context, config->asio ? resolveWithAsio(*config) : resolveWithAres(*config),
-            bind_cancellation_slot(cancellation.slot(), [&](std::exception_ptr ep)
-   {
-      signals.cancel();
-      if (ep)
-         std::rethrow_exception(ep);
-   }));
+            bind_cancellation_slot(cancellation.slot(), [&](std::exception_ptr ep) {
+               signals.cancel();
+               if (ep)
+                  std::rethrow_exception(ep);
+            }));
 
    if (config->verbose)
       run(context); // one line per completion handler, with timing

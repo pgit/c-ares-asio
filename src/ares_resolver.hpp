@@ -90,11 +90,10 @@ public:
    auto async_resolve(std::string_view host, std::string_view service, CompletionToken&& token)
    {
       return boost::asio::async_initiate<CompletionToken, Signature>(
-         [this](ResolveHandler handler, std::string host, std::string service)
-      { //
-         startResolve(std::move(host), std::move(service), std::move(handler));
-      },
-      token, std::string(host), std::string(service));
+         [this](ResolveHandler handler, std::string host, std::string service) {
+            startResolve(std::move(host), std::move(service), std::move(handler));
+         },
+         token, std::string(host), std::string(service));
    }
 
    //
@@ -106,11 +105,10 @@ public:
    auto async_lookupHttps(std::string_view host, CompletionToken&& token)
    {
       return boost::asio::async_initiate<CompletionToken, HttpsSignature>(
-         [this](HttpsHandler handler, std::string host)
-      { //
-         startHttpsLookup(std::move(host), std::move(handler));
-      },
-      token, std::string(host));
+         [this](HttpsHandler handler, std::string host) {
+            startHttpsLookup(std::move(host), std::move(handler));
+         },
+         token, std::string(host));
    }
 
 private:

@@ -366,73 +366,79 @@ const struct ares_socket_functions_ex& TlsTransport::functions()
       .version = 1,
       .flags = ARES_SOCKFUNC_FLAG_NONBLOCKING,
 
-      .asocket = [](int domain, int type, int protocol, void* data) -> ares_socket_t
-   { return static_cast<TlsTransport*>(data)->onSocket(domain, type, protocol); },
+      .asocket = [](int domain, int type, int protocol, void* data) -> ares_socket_t {
+         return static_cast<TlsTransport*>(data)->onSocket(domain, type, protocol);
+      },
 
-      .aclose = [](ares_socket_t fd, void* data) -> int
-   { return static_cast<TlsTransport*>(data)->onClose(fd); },
+      .aclose = [](ares_socket_t fd, void* data) -> int {
+         return static_cast<TlsTransport*>(data)->onClose(fd);
+      },
 
       .asetsockopt = [](ares_socket_t fd, ares_socket_opt_t opt, const void* value,
-                        ares_socklen_t size, void*) -> int
-   {
-      switch (opt)
-      {
-      case ARES_SOCKET_OPT_SENDBUF_SIZE:
-         return ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, value, size);
+                        ares_socklen_t size, void*) -> int {
+         switch (opt)
+         {
+         case ARES_SOCKET_OPT_SENDBUF_SIZE:
+            return ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, value, size);
 
-      case ARES_SOCKET_OPT_RECVBUF_SIZE:
-         return ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, value, size);
+         case ARES_SOCKET_OPT_RECVBUF_SIZE:
+            return ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, value, size);
 
-      case ARES_SOCKET_OPT_BIND_DEVICE:
-         return ::setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, value, size);
+         case ARES_SOCKET_OPT_BIND_DEVICE:
+            return ::setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, value, size);
 
-      case ARES_SOCKET_OPT_TCP_FASTOPEN:
-         //
-         // Fast open would defer the connect to the first write, and the first write is the
-         // one we need a finished handshake for. ENOSYS tells c-ares we mean it.
-         //
+         case ARES_SOCKET_OPT_TCP_FASTOPEN:
+            //
+            // Fast open would defer the connect to the first write, and the first write is the
+            // one we need a finished handshake for. ENOSYS tells c-ares we mean it.
+            //
+            errno = ENOSYS;
+            return -1;
+         }
+
          errno = ENOSYS;
          return -1;
-      }
-
-      errno = ENOSYS;
-      return -1;
-   },
+      },
 
       .aconnect = [](ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length,
-                     unsigned int, void* data) -> int
-   { return static_cast<TlsTransport*>(data)->onConnect(fd, address, length); },
+                     unsigned int, void* data) -> int {
+         return static_cast<TlsTransport*>(data)->onConnect(fd, address, length);
+      },
 
       .arecvfrom = [](ares_socket_t fd, void* buffer, size_t length, int, struct sockaddr* address,
-                      ares_socklen_t* address_len, void* data) -> ares_ssize_t
-   {
-      //
-      // Only ever called with an address for unconnected UDP sockets, which we do not have.
-      //
-      if (address && address_len)
-         *address_len = 0;
-      return static_cast<TlsTransport*>(data)->onRecv(fd, buffer, length);
-   },
+                      ares_socklen_t* address_len, void* data) -> ares_ssize_t {
+         //
+         // Only ever called with an address for unconnected UDP sockets, which we do not have.
+         //
+         if (address && address_len)
+            *address_len = 0;
+         return static_cast<TlsTransport*>(data)->onRecv(fd, buffer, length);
+      },
 
       .asendto = [](ares_socket_t fd, const void* buffer, size_t length, int flags,
-                    const struct sockaddr*, ares_socklen_t, void* data) -> ares_ssize_t
-   { return static_cast<TlsTransport*>(data)->onSend(fd, buffer, length, flags); },
+                    const struct sockaddr*, ares_socklen_t, void* data) -> ares_ssize_t {
+         return static_cast<TlsTransport*>(data)->onSend(fd, buffer, length, flags);
+      },
 
       .agetsockname = [](ares_socket_t fd, struct sockaddr* address, ares_socklen_t* length,
-                         void*) -> int { return ::getsockname(fd, address, length); },
+                         void*) -> int { //
+         return ::getsockname(fd, address, length);
+      },
 
       .abind = [](ares_socket_t fd, unsigned int, const struct sockaddr* address, socklen_t length,
-                  void*) -> int { return ::bind(fd, address, length); },
+                  void*) -> int { //
+         return ::bind(fd, address, length);
+      },
 
-      .aif_nametoindex = [](const char* name, void*) -> unsigned int
-   { return ::if_nametoindex(name); },
+      .aif_nametoindex = [](const char* name, void*) -> unsigned int {
+         return ::if_nametoindex(name);
+      },
 
-      .aif_indextoname = [](unsigned int index, char* buffer, size_t size, void*) -> const char*
-   {
-      if (size < IF_NAMESIZE)
-         return nullptr;
-      return ::if_indextoname(index, buffer);
-   },
+      .aif_indextoname = [](unsigned int index, char* buffer, size_t size, void*) -> const char* {
+         if (size < IF_NAMESIZE)
+            return nullptr;
+         return ::if_indextoname(index, buffer);
+      },
    };
 
    return table;
