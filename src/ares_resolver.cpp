@@ -152,6 +152,184 @@ struct Request
    AresResolver::ResolveHandler handler;
 };
 
+//
+// The same, for a single ares_search_dnsrec() request.
+//
+struct HttpsRequest
+{
+   any_io_executor executor;
+   AresResolver::HttpsHandler handler;
+};
+
+//
+// Renders one SvcParam value. c-ares hands these over as opaque bytes and tells us, through
+// ares_dns_opt_get_datatype(), which of the RFC 9460 wire formats to read them as.
+//
+std::string toText(unsigned short param, ares_dns_opt_datatype_t datatype,
+                   const unsigned char* value, size_t length)
+{
+   switch (datatype)
+   {
+   case ARES_OPT_DATATYPE_NONE:
+      return {}; // a key that is its own value, like "no-default-alpn"
+
+   case ARES_OPT_DATATYPE_STR_LIST:
+   {
+      //
+      // "alpn" and friends: each string prefixed with a single octet holding its length.
+      //
+      std::string result;
+      for (size_t i = 0; i < length;)
+      {
+         const size_t size = value[i++];
+         if (i + size > length)
+            break;
+
+         if (!result.empty())
+            result += ',';
+         result.append(reinterpret_cast<const char*>(value + i), size);
+         i += size;
+      }
+
+      return result;
+   }
+
+   case ARES_OPT_DATATYPE_U16:
+      return length < 2 ? std::string() : std::format("{}", (value[0] << 8) | value[1]);
+
+   case ARES_OPT_DATATYPE_U16_LIST:
+   {
+      //
+      // "mandatory" is the only SvcParam built this way, and what it lists is other SvcParam
+      // keys -- by number on the wire, but by name anywhere a person is going to read them.
+      //
+      std::string result;
+      for (size_t i = 0; i + 2 <= length; i += 2)
+      {
+         const auto key = static_cast<unsigned short>((value[i] << 8) | value[i + 1]);
+         const auto* name = param == ARES_SVCB_PARAM_MANDATORY
+                               ? ares_dns_opt_get_name(ARES_RR_HTTPS_PARAMS, key)
+                               : nullptr;
+
+         if (!result.empty())
+            result += ',';
+         result += name ? name : std::format("{}", key);
+      }
+
+      return result;
+   }
+
+   case ARES_OPT_DATATYPE_INADDR4_LIST:
+   {
+      std::string result;
+      for (size_t i = 0; i + 4 <= length; i += 4)
+      {
+         ip::address_v4::bytes_type bytes;
+         std::memcpy(bytes.data(), value + i, bytes.size());
+         if (!result.empty())
+            result += ',';
+         result += ip::address_v4(bytes).to_string();
+      }
+
+      return result;
+   }
+
+   case ARES_OPT_DATATYPE_INADDR6_LIST:
+   {
+      std::string result;
+      for (size_t i = 0; i + 16 <= length; i += 16)
+      {
+         ip::address_v6::bytes_type bytes;
+         std::memcpy(bytes.data(), value + i, bytes.size());
+         if (!result.empty())
+            result += ',';
+         result += ip::address_v6(bytes).to_string();
+      }
+
+      return result;
+   }
+
+   default:
+   {
+      //
+      // "ech" and anything defined after this was written: show it rather than drop it.
+      //
+      std::string result;
+      for (size_t i = 0; i < length; ++i)
+         result += std::format("{:02x}", value[i]);
+
+      return result;
+   }
+   }
+}
+
+//
+// Renders SvcParam 'index' of 'rr' as "key" or "key=value".
+//
+std::string toText(const ares_dns_rr_t* rr, size_t index)
+{
+   const unsigned char* value = nullptr;
+   size_t length = 0;
+
+   const auto param = ares_dns_rr_get_opt(rr, ARES_RR_HTTPS_PARAMS, index, &value, &length);
+   if (param == 65535) // c-ares' way of saying it did not like the question
+      return {};
+
+   const auto* name = ares_dns_opt_get_name(ARES_RR_HTTPS_PARAMS, param);
+   const auto key = name ? std::string(name) : std::format("key{}", param);
+
+   const auto text =
+      value ? toText(param, ares_dns_opt_get_datatype(ARES_RR_HTTPS_PARAMS, param), value, length)
+            : std::string();
+
+   return text.empty() ? key : std::format("{}={}", key, text);
+}
+
+void httpsCallback(void* arg, ares_status_t status, size_t timeouts,
+                   const ares_dns_record_t* dnsrec)
+{
+   std::unique_ptr<HttpsRequest> request(static_cast<HttpsRequest*>(arg));
+   spdlog::debug("ares_search_dnsrec: {} ({} timeout(s))", ares_strerror(static_cast<int>(status)),
+                 timeouts);
+
+   const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
+                      ? error_code(error::operation_aborted)
+                      : make_ares_error(static_cast<int>(status));
+
+   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
+      slot.clear();
+
+   AresResolver::HttpsResults records;
+   if (dnsrec && status == ARES_SUCCESS)
+   {
+      const auto count = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER);
+      for (size_t i = 0; i < count; ++i)
+      {
+         const auto* rr = ares_dns_record_rr_get_const(dnsrec, ARES_SECTION_ANSWER, i);
+
+         //
+         // The answer section also carries whatever CNAMEs led here, which are not ours.
+         //
+         if (!rr || ares_dns_rr_get_type(rr) != ARES_REC_TYPE_HTTPS)
+            continue;
+
+         HttpsRecord record;
+         record.priority = ares_dns_rr_get_u16(rr, ARES_RR_HTTPS_PRIORITY);
+         if (const auto* target = ares_dns_rr_get_str(rr, ARES_RR_HTTPS_TARGET))
+            record.target = target;
+
+         const auto params = ares_dns_rr_get_opt_cnt(rr, ARES_RR_HTTPS_PARAMS);
+         for (size_t param = 0; param < params; ++param)
+            if (auto text = toText(rr, param); !text.empty())
+               record.params.push_back(std::move(text));
+
+         records.push_back(std::move(record));
+      }
+   }
+
+   post(request->executor, append(std::move(request->handler), ec, std::move(records)));
+}
+
 std::optional<ip::tcp::endpoint> toEndpoint(const ares_addrinfo_node& node)
 {
    if (node.ai_family == AF_INET && node.ai_addrlen >= sizeof(sockaddr_in))
@@ -315,6 +493,54 @@ void AresResolver::startResolve(std::string host, std::string service, ResolveHa
                     &addrinfoCallback, request.release());
 
    updateTimeout();
+}
+
+void AresResolver::startHttpsLookup(std::string host, HttpsHandler handler)
+{
+   if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
+      slot.assign([this](cancellation_type) { //
+         ares_cancel(m_channel);
+      });
+
+   auto request = std::make_unique<HttpsRequest>(m_executor, std::move(handler));
+
+   //
+   // ares_search_dnsrec() wants the question as a record rather than as a name, so that it can
+   // swap the name out as it works down the search list.
+   //
+   ares_dns_record_t* query = nullptr;
+   auto status =
+      ares_dns_record_create(&query, 0, ARES_FLAG_RD, ARES_OPCODE_QUERY, ARES_RCODE_NOERROR);
+   if (status == ARES_SUCCESS)
+      status = ares_dns_record_query_add(query, host.c_str(), ARES_REC_TYPE_HTTPS, ARES_CLASS_IN);
+
+   if (status == ARES_SUCCESS)
+   {
+      spdlog::debug("ares_search_dnsrec({}, HTTPS)...", host);
+
+      //
+      // The callback owns the request from here on, and may well have run and freed it before
+      // this call returns -- ARES_EFORMERR is the one status that does not reach it.
+      //
+      status = ares_search_dnsrec(m_channel, query, &httpsCallback, request.get());
+      if (status != ARES_EFORMERR)
+      {
+         request.release();
+         ares_dns_record_destroy(query);
+         updateTimeout();
+         return;
+      }
+   }
+
+   ares_dns_record_destroy(query);
+
+   //
+   // Nothing was enqueued and nothing will call the callback, so the request is still ours to
+   // finish. Both ways of getting here mean a bug or an allocation failure right in this
+   // function, not anything the name could have done.
+   //
+   spdlog::error("HTTPS query for {}: {}", host, ares_strerror(status));
+   post(m_executor, append(std::move(request->handler), make_ares_error(status), HttpsResults()));
 }
 
 // --------------------------------------------------------------------------------------------------

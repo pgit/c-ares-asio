@@ -21,6 +21,7 @@
 #include "ares_resolver.hpp"
 
 #include <expected>
+#include <format>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -127,6 +128,11 @@ awaitable<void> resolveWithAsio(const Config& config)
    if (!config.servers.empty())
       spdlog::warn("--server is not supported by the ASIO resolver, ignoring it");
 
+   //
+   // getaddrinfo() answers with addresses and nothing else, so this path is addresses only.
+   //
+   spdlog::debug("the ASIO resolver cannot look up HTTPS records");
+
    ip::tcp::resolver resolver(co_await this_coro::executor);
    for (const auto& host : config.hosts)
    {
@@ -145,6 +151,37 @@ awaitable<void> resolveWithAsio(const Config& config)
    }
 }
 
+//
+// The HTTPS record (RFC 9460) that goes with the addresses, printed the way dig shows it:
+// priority, target, and then the SvcParams. Most names have none, which is not a problem.
+//
+awaitable<bool> lookupHttps(AresResolver& resolver, const std::string& host)
+{
+   auto [ec, records] = co_await resolver.async_lookupHttps(host, as_tuple);
+   if (ec == error::operation_aborted)
+      co_return false;
+
+   if (ec == make_ares_error(ARES_ENODATA) || ec == make_ares_error(ARES_ENOTFOUND))
+      spdlog::debug("{}: no HTTPS record", host);
+   else if (ec)
+      spdlog::warn("{}: HTTPS: {}", host, ec.message());
+
+   for (const auto& record : records)
+   {
+      //
+      // An empty target is the record's own name, which is a bare dot in presentation form.
+      //
+      std::string text =
+         std::format("HTTPS {} {}", record.priority, record.target.empty() ? "." : record.target);
+      for (const auto& param : record.params)
+         text += ' ' + param;
+
+      spdlog::info("{}: {}", host, text);
+   }
+
+   co_return true;
+}
+
 awaitable<void> resolveWithAres(const Config& config)
 {
    co_await this_coro::throw_if_cancelled(false);
@@ -160,16 +197,21 @@ awaitable<void> resolveWithAres(const Config& config)
    {
       spdlog::debug("resolving {}:{}...", host, config.service);
       auto [ec, endpoints] = co_await resolver.async_resolve(host, config.service, as_tuple);
+      if (ec == error::operation_aborted)
+         co_return;
+
       if (ec)
-      {
-         if (ec == error::operation_aborted)
-            co_return;
          spdlog::error("{}: {}", host, ec.message());
-         continue;
-      }
 
       for (const auto& endpoint : endpoints)
          spdlog::info("{}: {}", host, endpoint.address().to_string());
+
+      //
+      // Independent of the addresses, and asked even when those did not come: a name can carry an
+      // HTTPS record that points the client somewhere else entirely.
+      //
+      if (!co_await lookupHttps(resolver, host))
+         co_return;
    }
 }
 

@@ -34,12 +34,36 @@ boost::system::error_code make_ares_error(int status);
 
 // --------------------------------------------------------------------------------------------------
 
+//
+// One HTTPS resource record (RFC 9460). A 'priority' of 0 is the alias form, where 'target' names
+// the host to continue at; anything else is the service form, where 'params' describes how to
+// reach the endpoint.
+//
+struct HttpsRecord
+{
+   unsigned short priority = 0;
+   std::string target; // empty, or ".", for the record's own name
+
+   //
+   // The SvcParams, already in presentation form ("alpn=h3,h2", "ipv4hint=104.20.23.154"). Every
+   // key has its own value syntax and c-ares hands them over as opaque bytes, so there is not
+   // much to be gained from carrying them around any further apart.
+   //
+   std::vector<std::string> params;
+};
+
+// --------------------------------------------------------------------------------------------------
+
 class AresResolver
 {
 public:
    using Results = std::vector<boost::asio::ip::tcp::endpoint>;
    using Signature = void(boost::system::error_code, Results);
    using ResolveHandler = boost::asio::any_completion_handler<Signature>;
+
+   using HttpsResults = std::vector<HttpsRecord>;
+   using HttpsSignature = void(boost::system::error_code, HttpsResults);
+   using HttpsHandler = boost::asio::any_completion_handler<HttpsSignature>;
 
    //
    // With 'tls' enabled every query goes out over DNS over TLS instead of plain UDP/TCP, and the
@@ -73,10 +97,27 @@ public:
       token, std::string(host), std::string(service));
    }
 
+   //
+   // Looks up the HTTPS record (RFC 9460) for 'host', search domains and all, the way
+   // async_resolve() looks up its addresses. A host that has none completes with ARES_ENODATA,
+   // which is the common case rather than a problem.
+   //
+   template <typename CompletionToken>
+   auto async_lookupHttps(std::string_view host, CompletionToken&& token)
+   {
+      return boost::asio::async_initiate<CompletionToken, HttpsSignature>(
+         [this](HttpsHandler handler, std::string host)
+      { //
+         startHttpsLookup(std::move(host), std::move(handler));
+      },
+      token, std::string(host));
+   }
+
 private:
    struct Socket;
 
    void startResolve(std::string host, std::string service, ResolveHandler handler);
+   void startHttpsLookup(std::string host, HttpsHandler handler);
 
    static void socketStateCallback(void* data, ares_socket_t fd, int readable, int writable);
    void onSocketState(ares_socket_t fd, bool readable, bool writable);

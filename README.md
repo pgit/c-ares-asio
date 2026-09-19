@@ -5,7 +5,9 @@ Scratch project for experimenting with [c-ares](https://c-ares.org/) integration
 
 `resolve` looks up the host names given on the command line, one after the other. By default it
 uses c-ares, driven by the ASIO event loop; with `--asio` it uses ASIO's own `ip::tcp::resolver`
-instead, which runs `getaddrinfo()` on an internal thread. Both should print the same addresses.
+instead, which runs `getaddrinfo()` on an internal thread. Both should print the same addresses --
+only the c-ares path also looks up the HTTPS record, since `getaddrinfo()` answers with addresses
+and nothing else.
 
 ## How the integration works
 
@@ -28,6 +30,31 @@ handle for an individual `ares_getaddrinfo()` request, so the cancellation slot 
 
 Not done yet: batching several ready descriptors into a single `ares_process_fds()` call -- ASIO
 delivers one completion handler per descriptor, so each one currently triggers its own call.
+
+## HTTPS records
+
+Besides the addresses, every name is also looked up for its HTTPS record
+([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460), RR type 65) -- the record that tells a client
+which protocols an endpoint speaks before it connects. The two lookups are independent, so a name
+that has no addresses is still asked for its record.
+
+c-ares parses these itself: `ares_search_dnsrec()` asks the question the same way
+`ares_getaddrinfo()` does, search domains and all, and the answer comes back as an
+`ares_dns_record_t` rather than as bytes. The priority and target come straight off it, but the
+SvcParams are opaque values whose syntax depends on their key, so
+[`ares_resolver.cpp`](src/ares_resolver.cpp) asks `ares_dns_opt_get_datatype()` which wire format
+each one uses and renders it the way the RFC presents it:
+
+```sh
+$ build/src/resolve --server 1.1.1.1 cloudflare.com
+14:20:46.175 info cloudflare.com: 104.16.133.229
+...
+14:20:46.192 info cloudflare.com: HTTPS 1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5
+```
+
+A name with no such record says so at `--verbose` and is otherwise quiet, which is the common
+case. Note that a resolver is free to answer type 65 with NODATA even where a record exists --
+the Docker Desktop resolver in this devcontainer does, which is what `--server` is for.
 
 ## DNS over TLS
 
