@@ -16,6 +16,8 @@
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/error_code.hpp>
 
+#include "tls_transport.hpp"
+
 #include <ares.h>
 
 #include <map>
@@ -39,7 +41,11 @@ public:
    using Signature = void(boost::system::error_code, Results);
    using ResolveHandler = boost::asio::any_completion_handler<Signature>;
 
-   explicit AresResolver(boost::asio::any_io_executor executor);
+   //
+   // With 'tls' enabled every query goes out over DNS over TLS instead of plain UDP/TCP, and the
+   // servers move to port 853 unless --server named a port explicitly.
+   //
+   explicit AresResolver(boost::asio::any_io_executor executor, const TlsOptions& tls = {});
    ~AresResolver();
 
    //
@@ -84,5 +90,6 @@ private:
    boost::asio::any_io_executor m_executor;
    boost::asio::steady_timer m_timer;
    ares_channel_t* m_channel = nullptr;
+   std::unique_ptr<TlsTransport> m_tls; // null unless DNS over TLS was asked for
    std::map<ares_socket_t, std::shared_ptr<Socket>> m_sockets;
 };

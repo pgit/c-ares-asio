@@ -35,6 +35,9 @@ find_package(spdlog REQUIRED)
 # ares_process_fds() was added in 1.34
 find_package(c-ares 1.34 CONFIG REQUIRED)
 
+# c-ares has no DNS over TLS of its own -- see src/tls_transport.hpp
+find_package(OpenSSL REQUIRED)
+
 # --------------------------------------------------------------------------------------------------
 
 add_subdirectory(src)

@@ -35,6 +35,7 @@ struct Config
    std::string service = "443";
    std::string servers;
    std::vector<std::string> hosts;
+   TlsOptions tls;
 };
 
 std::expected<Config, int> parseConfig(int argc, char* argv[])
@@ -51,6 +52,15 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    opts("server,n", po::value(&config.servers),
         "DNS server(s) to query instead of the ones from /etc/resolv.conf, comma separated "
         "(c-ares only) -- try 192.0.2.1 for a black hole");
+   opts("dot,t", po::bool_switch(&config.tls.enabled),
+        "use DNS over TLS (RFC 7858) -- forces TCP and moves the servers to port 853 (c-ares "
+        "only)");
+   opts("tls-hostname", po::value(&config.tls.hostname),
+        "server name to use for SNI and to verify the certificate against, e.g. "
+        "one.one.one.one");
+   opts("tls-no-verify",
+        po::value<bool>()->zero_tokens()->notifier([&config](bool) { config.tls.verify = false; }),
+        "accept any certificate (testing only)");
    opts("host", po::value(&config.hosts)->multitoken(), "host name(s) to resolve");
 
    po::positional_options_description positional;
@@ -77,6 +87,33 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    if (config.hosts.empty())
    {
       std::cerr << "no host given" << std::endl << desc;
+      return std::unexpected(EXIT_FAILURE);
+   }
+
+   if (config.tls.enabled)
+   {
+      if (config.asio)
+      {
+         std::cerr << "--dot is not supported by the ASIO resolver" << std::endl << desc;
+         return std::unexpected(EXIT_FAILURE);
+      }
+
+      //
+      // --server takes an address, so there is no name to check the certificate against unless
+      // one is given. Rather than quietly talk to whoever answers, say so.
+      //
+      if (config.tls.verify && config.tls.hostname.empty())
+      {
+         std::cerr << "--dot needs --tls-hostname to verify the server certificate against, "
+                      "or --tls-no-verify to skip the check"
+                   << std::endl
+                   << desc;
+         return std::unexpected(EXIT_FAILURE);
+      }
+   }
+   else if (!config.tls.hostname.empty() || !config.tls.verify)
+   {
+      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot" << std::endl << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
@@ -112,7 +149,7 @@ awaitable<void> resolveWithAres(const Config& config)
 {
    co_await this_coro::throw_if_cancelled(false);
 
-   AresResolver resolver(co_await this_coro::executor);
+   AresResolver resolver(co_await this_coro::executor, config.tls);
    if (auto ec = resolver.setServers(config.servers))
    {
       spdlog::error("--server '{}': {}", config.servers, ec.message());
