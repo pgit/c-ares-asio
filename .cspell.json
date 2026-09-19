@@ -2,6 +2,7 @@
     "words": [
         "addrinfo",
         "alpn",
+        "arecvfrom",
         "ares",
         "ASIO",
         "BINDTODEVICE",
@@ -11,6 +12,7 @@
         "coro",
         "csv",
         "dnsrec",
+        "EBADNAME",
         "EBADSTR",
         "ECANCELLED",
         "ECONNRESET",
@@ -46,6 +48,7 @@
         "rcode",
         "RCVBUF",
         "RDATA",
+        "RECVBUF",
         "resolv",
         "setsockopt",
         "SNDBUF",
