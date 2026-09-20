@@ -89,7 +89,7 @@ What it does have is [`ares_set_socket_functions_ex()`](https://c-ares.org/docs/
 which replaces its socket layer wholesale. DNS over TCP is a length-prefixed byte stream and c-ares
 does that framing itself, so wrapping the stream in TLS is enough to make it DNS over TLS
 ([RFC 7858](https://www.rfc-editor.org/rfc/rfc7858)). That is what
-[`src/tls_transport.cpp`](src/tls_transport.cpp) does, in OpenSSL:
+[`src/tls_transport.cpp`](src/tls_transport.cpp) does, against the OpenSSL API:
 
 * `--dot` puts the channel in `ARES_FLAG_USEVC | ARES_FLAG_STAYOPEN` -- TCP only, and the
   connection outlives the query, because otherwise it is a handshake per name;
@@ -100,9 +100,9 @@ does that framing itself, so wrapping the stream in TLS is enough to make it DNS
   the first write, and the first write is the one that needs a finished handshake.
 
 The handshake itself is deliberately *not* driven from those callbacks. c-ares decides what to wait
-for from the queries it has pending, which has nothing to do with what OpenSSL needs next, and
-answering a write-readiness event with `EAGAIN` because the handshake wants to read would just spin
--- a connected socket is writable nearly always. So `AresResolver::onSocketEvent()` calls
+for from the queries it has pending, which has nothing to do with what the TLS library needs next,
+and answering a write-readiness event with `EAGAIN` because the handshake wants to read would just
+spin -- a connected socket is writable nearly always. So `AresResolver::onSocketEvent()` calls
 `TlsTransport::advance()` first, waits on whatever `SSL_connect()` asked for, and only lets c-ares
 see the socket once there is a session on it. A handshake that fails leaves the socket poisoned,
 and the next `SSL_read()` reports `ECONNRESET` so that c-ares fails the server the usual way.
@@ -112,12 +112,17 @@ for a byte-stream hook -- it is not done here.
 
 ## Building
 
-The devcontainer brings the whole toolchain (clang, libc++, Boost, spdlog, c-ares, OpenSSL).
+The devcontainer brings the whole toolchain (clang, libc++, Boost, spdlog, c-ares, OpenSSL, AWS-LC).
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
+
+The TLS library is `-DTLS_LIBRARY=AWS-LC` (the default, a static build the devcontainer keeps in
+`/opt/boringssl` -- `-DBORINGSSL_ROOT=` points elsewhere) or `-DTLS_LIBRARY=OpenSSL` (the system
+one, shared). The transport uses nothing beyond the OpenSSL API that AWS-LC implements too, so the
+switch is a link-time one: no source file knows which of the two it got.
 
 ## Running
 

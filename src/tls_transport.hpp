@@ -58,9 +58,9 @@ public:
    // Drives the TCP connect and, after it, the TLS handshake for 'fd'.
    //
    // The handshake is deliberately *not* driven from the socket callbacks: c-ares decides what to
-   // wait for based on which queries it has pending, which has nothing to do with what OpenSSL
-   // needs next, and answering a write-readiness event with EAGAIN because the handshake wants to
-   // read would just spin. So the event loop calls this first and only lets c-ares see the socket
+   // wait for based on which queries it has pending, which has nothing to do with what the TLS
+   // library needs next, and answering a write-readiness event with EAGAIN because the handshake
+   // wants to read would just spin. So the event loop calls this first and only lets c-ares see the socket
    // once there is a TLS session on it.
    //
    Interest advance(ares_socket_t fd, bool writable);

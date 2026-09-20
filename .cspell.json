@@ -6,6 +6,7 @@
         "ares",
         "ASIO",
         "BINDTODEVICE",
+        "boringssl",
         "CANONNAME",
         "cares",
         "CLOEXEC",

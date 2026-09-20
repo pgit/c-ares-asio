@@ -35,8 +35,27 @@ find_package(spdlog REQUIRED)
 # ares_process_fds() was added in 1.34
 find_package(c-ares 1.34 CONFIG REQUIRED)
 
-# c-ares has no DNS over TLS of its own -- see src/tls_transport.hpp
-find_package(OpenSSL REQUIRED)
+# c-ares has no DNS over TLS of its own -- see src/tls_transport.hpp. Either library will do: the
+# transport sticks to the OpenSSL API that AWS-LC implements as well, so the choice is made here
+# and nowhere else. Everything that needs TLS links 'tls'.
+set(TLS_LIBRARY "AWS-LC" CACHE STRING "TLS library to build against: OpenSSL or AWS-LC")
+set_property(CACHE TLS_LIBRARY PROPERTY STRINGS OpenSSL AWS-LC)
+
+add_library(tls INTERFACE)
+
+if (TLS_LIBRARY STREQUAL "OpenSSL")
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(tls INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "Using TLS library: OpenSSL ${OPENSSL_VERSION}")
+elseif (TLS_LIBRARY STREQUAL "AWS-LC")
+    set(BORINGSSL_ROOT /opt/boringssl CACHE PATH "Installation prefix of BoringSSL / AWS-LC")
+    list(PREPEND CMAKE_PREFIX_PATH ${BORINGSSL_ROOT}) # ssl-config.cmake finds 'crypto' through it
+    find_package(ssl CONFIG REQUIRED)
+    target_link_libraries(tls INTERFACE AWS::ssl)
+    message(STATUS "Using TLS library: AWS-LC (${ssl_DIR})")
+else()
+    message(FATAL_ERROR "TLS_LIBRARY is '${TLS_LIBRARY}', expected OpenSSL or AWS-LC")
+endif()
 
 # --------------------------------------------------------------------------------------------------
 
