@@ -588,11 +588,10 @@ void AresResolver::arm(const std::shared_ptr<Socket>& socket)
    // and one that wants to read while c-ares waits for writability spins, because a connected
    // socket is writable almost all of the time.
    //
-   const bool handshaking = socket->tlsInterest != TlsTransport::Interest::None;
-   const bool wantRead =
-      handshaking ? socket->tlsInterest == TlsTransport::Interest::Read : socket->wantRead;
-   const bool wantWrite =
-      handshaking ? socket->tlsInterest == TlsTransport::Interest::Write : socket->wantWrite;
+   using enum TlsTransport::Interest;
+   const bool handshaking = socket->tlsInterest != None;
+   const bool wantRead = handshaking ? socket->tlsInterest == Read : socket->wantRead;
+   const bool wantWrite = handshaking ? socket->tlsInterest == Write : socket->wantWrite;
 
    if (wantRead && !socket->waitingRead)
    {
