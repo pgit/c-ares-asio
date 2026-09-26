@@ -2,7 +2,9 @@
 
 #include <spdlog/spdlog.h>
 
+#include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/x509v3.h>
 
 #include <fcntl.h>
@@ -16,6 +18,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <stdexcept>
 
@@ -38,6 +41,82 @@ std::string sslError()
    }
 
    return message.empty() ? "no error" : message;
+}
+
+//
+// Key exchange group of the handshake, e.g. "X25519 (253 bits)" or "X25519MLKEM768". The name is
+// known even for groups without an EVP_PKEY, like the post-quantum hybrids, which is also why
+// there may be no bit count to go with it.
+//
+std::string keyExchange(SSL* ssl)
+{
+#if defined(OPENSSL_IS_AWSLC) || defined(OPENSSL_IS_BORINGSSL)
+   const char* group = SSL_get_group_name(SSL_get_group_id(ssl));
+#else
+   const char* group = SSL_get0_group_name(ssl);
+#endif
+   std::string name = group ? group : "unknown";
+
+   EVP_PKEY* key = nullptr;
+   if (SSL_get_peer_tmp_key(ssl, &key) != 1 || !key)
+      return name;
+
+   const auto bits = EVP_PKEY_bits(key);
+   EVP_PKEY_free(key);
+   return std::format("{} ({} bits)", name, bits);
+}
+
+//
+// A distinguished name in RFC 2253 form, e.g. "CN=dns.google".
+//
+std::string distinguishedName(const X509_NAME* name)
+{
+   if (!name)
+      return "none";
+
+   BIO* bio = BIO_new(BIO_s_mem());
+   if (!bio)
+      return "?";
+
+   std::string result = "?";
+   if (X509_NAME_print_ex(bio, name, 0, XN_FLAG_RFC2253) >= 0)
+   {
+      const char* data = nullptr;
+      const auto length = BIO_get_mem_data(bio, &data);
+      result.assign(data, static_cast<size_t>(length));
+   }
+
+   BIO_free(bio);
+   return result;
+}
+
+//
+// What was negotiated.
+//
+std::string handshakeInfo(SSL* ssl)
+{
+   return std::format("{}, cipher={}, group={}{}", SSL_get_version(ssl), SSL_get_cipher_name(ssl),
+                      keyExchange(ssl), SSL_session_reused(ssl) ? ", resumed" : "");
+}
+
+//
+// Who we negotiated it with.
+//
+std::string peerInfo(SSL* ssl)
+{
+   const X509* peer = SSL_get0_peer_certificate(ssl);
+   if (!peer)
+      return "no peer certificate";
+
+   //
+   // With --tls-no-verify the chain is not checked at all, so do not pretend it was.
+   //
+   const bool verified =
+      SSL_get_verify_mode(ssl) != SSL_VERIFY_NONE && SSL_get_verify_result(ssl) == X509_V_OK;
+
+   return std::format("subject={}, issuer={}, {}", distinguishedName(X509_get_subject_name(peer)),
+                      distinguishedName(X509_get_issuer_name(peer)),
+                      verified ? "verified" : "NOT verified");
 }
 
 } // namespace
@@ -158,8 +237,8 @@ TlsTransport::Interest TlsTransport::advance(ares_socket_t fd, bool writable)
    if (result == 1)
    {
       session->state = Session::State::Established;
-      spdlog::debug("fd={} TLS established: {} {}", fd, SSL_get_version(session->ssl),
-                    SSL_get_cipher(session->ssl));
+      spdlog::info("fd={} TLS established: {}", fd, handshakeInfo(session->ssl));
+      spdlog::info("fd={} TLS peer: {}", fd, peerInfo(session->ssl));
       return Interest::None;
    }
 
