@@ -475,7 +475,8 @@ void AresResolver::startResolve(std::string host, std::string service, ResolveHa
 {
    //
    // There is no handle for an individual ares_getaddrinfo() request, so cancelling one takes the
-   // whole channel with it. Good enough while queries are issued one at a time.
+   // whole channel with it -- every other lookup in flight included. Good enough while the only
+   // thing that ever cancels is the one that stops everything.
    //
    if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
       slot.assign([this](cancellation_type) { //

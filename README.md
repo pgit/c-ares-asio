@@ -3,11 +3,11 @@
 Scratch project for experimenting with [c-ares](https://c-ares.org/) integration into
 [Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html).
 
-`resolve` looks up the host names given on the command line, one after the other. By default it
-uses c-ares, driven by the ASIO event loop; with `--asio` it uses ASIO's own `ip::tcp::resolver`
-instead, which runs `getaddrinfo()` on an internal thread. Both should print the same addresses --
-only the c-ares path also looks up the HTTPS record, since `getaddrinfo()` answers with addresses
-and nothing else.
+`resolve` looks up the host names given on the command line, or those of the URLs listed in a
+file, several at a time. By default it uses c-ares, driven by the ASIO event loop; with `--asio` it
+uses ASIO's own `ip::tcp::resolver` instead, which runs `getaddrinfo()` on an internal thread. Both
+should print the same addresses -- only the c-ares path also looks up the HTTPS record, since
+`getaddrinfo()` answers with addresses and nothing else.
 
 ## How the integration works
 
@@ -26,7 +26,9 @@ Queries are exposed as a regular ASIO asynchronous operation (`async_resolve()` 
 
 Cancellation works too (`Ctrl-C` interrupts a lookup cleanly), but only bluntly: c-ares has no
 handle for an individual `ares_getaddrinfo()` request, so the cancellation slot calls
-`ares_cancel()`, which takes every pending query on the channel with it.
+`ares_cancel()`, which takes every pending query on the channel with it -- the lookups of every
+other name in flight included. That is exactly what `Ctrl-C` is after, and nothing else here
+cancels.
 
 That puts some weight on `ares_cancel()`, which is worth knowing about:
 [GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542)
@@ -75,6 +77,50 @@ info cloudflare.com: HTTPS 1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229
 A name with no such record says so at `--verbose` and is otherwise quiet, which is the common
 case. Note that a resolver is free to answer type 65 with NODATA even where a record exists --
 the Docker Desktop resolver in this devcontainer does, which is what `--server` is for.
+
+## Many names at once
+
+`--file` takes the names from a file of URLs instead, one per line. Only the host of each URL is of
+any interest -- scheme, port, path and the rest are dropped, nothing is ever connected to -- and a
+host that several URLs share is looked up once. The results come as one line per host: the name,
+its first IPv4 address, its first IPv6 address and its HTTPS record, with a dash for whatever there
+is none of and, in parentheses, whatever went wrong:
+
+```sh
+$ build/src/resolve --server 1.1.1.1 --file url_list.txt
+accounts.google.com                  142.251.127.84   2a00:1450:4001:c21::54                   -
+accounts.nintendo.com                23.2.13.51       -                                        -
+accounts.spotify.com                 151.101.131.42   2a04:4e42:600::810                       -
+...
+adsmanager.facebook.com              57.144.244.141   2a03:2880:f37a:8d:face:b00c:0:2          1 . alpn=h2,h3; 2 star.fallback.c10r.facebook.com alpn=h2,h3
+...
+serviceonline.bihar.gov.in           -                -                                        -  (Timeout while contacting DNS servers)
+...
+www.hobbylobby.com                   149.126.77.120   -                                        -  (HTTPS: DNS server returned general failure)
+...
+```
+
+`--concurrency` (10 unless told otherwise) is the number of names in flight at any time, with or
+without `--file`. It is that many coroutines, each taking the next name off the list, waiting for
+its answer and coming back for more, held together by a ranged
+[`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html).
+There is still one channel and one thread: c-ares keeps all the queries apart by itself, over UDP
+as well as pipelined on the one connection `--dot` has. For the 1000 names of a list of popular
+sites, asked of 1.1.1.1:
+
+| `--concurrency` | 1 | 10 | 50 |
+| --- | --- | --- | --- |
+| time | 84 s | 9 s | 3 s |
+
+Every name is printed the moment its answer is in, so the output doubles as the progress report --
+and comes in whatever order the answers land in. `--ordered` prints them in the order they were
+given instead, which makes two runs comparable line by line. The price is that a single name which
+takes its time, and a timeout is several seconds, holds back every row behind it: none of the
+lookups, but all of the progress.
+
+With `--asio`, the number makes no difference: `getaddrinfo()` blocks, ASIO calls it on a single
+thread unless its `resolver.threads` configuration says otherwise, and however many lookups are
+handed over at once, they are answered one after the other.
 
 ## DNS over TLS
 
@@ -137,7 +183,10 @@ $ build/src/resolve -v localhost www.google.com
 ```
 
 `--service` selects the service name or port number to resolve for, `--asio` switches to the ASIO
-resolver, `--help` lists all options.
+resolver, `--file` reads the names from a file of URLs, `--concurrency` sets how many of them are
+looked up at the same time (`--concurrency 1` for strictly one after the other, which is the
+easiest to follow with `-v`), `--ordered` keeps the output in the order the names were given,
+`--help` lists all options.
 
 `--dot` resolves over DNS over TLS. Since `--server` takes an address, there is no name to check
 the certificate against unless `--tls-hostname` gives one -- pass it, or `--tls-no-verify` to skip
