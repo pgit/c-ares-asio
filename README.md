@@ -186,7 +186,8 @@ $ build/src/resolve -v localhost www.google.com
 resolver, `--file` reads the names from a file of URLs, `--concurrency` sets how many of them are
 looked up at the same time (`--concurrency 1` for strictly one after the other, which is the
 easiest to follow with `-v`), `--ordered` keeps the output in the order the names were given,
-`--help` lists all options.
+`--color` keeps the colours where the output does not go to a terminal (`| less -R`), `--help`
+lists all options.
 
 `--dot` resolves over DNS over TLS. Since `--server` takes an address, there is no name to check
 the certificate against unless `--tls-hostname` gives one -- pass it, or `--tls-no-verify` to skip

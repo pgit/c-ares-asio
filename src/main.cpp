@@ -21,6 +21,7 @@
 
 #include <boost/program_options.hpp>
 
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include "ares_resolver.hpp"
@@ -40,7 +41,10 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include <unistd.h>
 
 using namespace boost::asio;
 namespace po = boost::program_options;
@@ -50,6 +54,7 @@ struct Config
    bool verbose = false;
    bool asio = false;
    bool ordered = false;
+   bool color = false;
    int concurrency = 10;
    std::string service = "443";
    std::string servers;
@@ -145,6 +150,8 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
         "number of hosts to look up at the same time");
    opts("ordered,o", po::bool_switch(&config.ordered),
         "print the results in the order the hosts were given, rather than as the answers come in");
+   opts("color", po::bool_switch(&config.color),
+        "colour the output even where it does not go to a terminal, e.g. into 'less -R'");
    opts("host", po::value(&config.hosts)->multitoken(), "host name(s) to resolve");
 
    po::positional_options_description positional;
@@ -240,15 +247,50 @@ bool isNoRecord(const boost::system::error_code& ec)
    return ec == make_ares_error(ARES_ENODATA) || ec == make_ares_error(ARES_ENOTFOUND);
 }
 
+//
+// Addresses come in the colours "ip -color address" gives them: IPv4 in magenta, IPv6 in blue.
+// Host names are yellow. Only a terminal gets any of it unless --color says otherwise, which is
+// where spdlog colours the log level as well.
+//
+enum class Color { name = 33, v6 = 34, v4 = 35 };
+
+bool useColor = false;
+
+std::string colored(std::string_view text, Color color)
+{
+   return useColor ? std::format("\x1b[{}m{}\x1b[0m", std::to_underlying(color), text)
+                   : std::string(text);
+}
+
+//
+// Padded to 'width' before the colour goes on, as the escape sequences would count towards it.
+//
+std::string toText(const ip::address& address, size_t width = 0)
+{
+   return colored(std::format("{:{}}", address.to_string(), width),
+                  address.is_v4() ? Color::v4 : Color::v6);
+}
+
 std::string toText(const HttpsRecord& record)
 {
    //
    // An empty target is the record's own name, which is a bare dot in presentation form.
    //
-   std::string text =
-      std::format("{} {}", record.priority, record.target.empty() ? "." : record.target);
-   for (const auto& param : record.params)
-      text += ' ' + param;
+   std::string text = std::format(
+      "{} {}", record.priority, record.target.empty() ? "." : colored(record.target, Color::name));
+   for (std::string_view param : record.params)
+   {
+      //
+      // The address hints are addresses like any other, the rest of the parameters are not.
+      //
+      const bool v4 = param.starts_with("ipv4hint=");
+      const auto value = v4 || param.starts_with("ipv6hint=") ? param.find('=') + 1 : param.size();
+
+      text += ' ';
+      text += param.substr(0, value);
+      if (value < param.size())
+         text += colored(param.substr(value), v4 ? Color::v4 : Color::v6);
+   }
 
    return text;
 }
@@ -257,13 +299,15 @@ std::string toText(const HttpsRecord& record)
 // Everything there is to say about one name: every address and every HTTPS record on a line of
 // its own.
 //
-void reportInFull(const std::string& host, const Lookup& lookup)
+void reportInFull(const std::string& name, const Lookup& lookup)
 {
+   const auto host = colored(name, Color::name);
+
    if (lookup.ec)
       spdlog::error("{}: {}", host, lookup.ec.message());
 
    for (const auto& endpoint : lookup.endpoints)
-      spdlog::info("{}: {}", host, endpoint.address().to_string());
+      spdlog::info("{}: {}", host, toText(endpoint.address()));
 
    if (isNoRecord(lookup.httpsEc))
       spdlog::debug("{}: no HTTPS record", host);
@@ -281,10 +325,11 @@ void reportInFull(const std::string& host, const Lookup& lookup)
 //
 void reportCompact(const std::string& host, const Lookup& lookup, size_t width)
 {
-   const auto first = [&](bool v4) {
+   const auto first = [&](bool v4, size_t width) {
       const auto it = std::ranges::find(
          lookup.endpoints, v4, [](const auto& endpoint) { return endpoint.address().is_v4(); });
-      return it == lookup.endpoints.end() ? std::string("-") : it->address().to_string();
+      return it == lookup.endpoints.end() ? std::format("{:{}}", "-", width)
+                                          : toText(it->address(), width);
    };
 
    std::string https;
@@ -298,8 +343,9 @@ void reportCompact(const std::string& host, const Lookup& lookup, size_t width)
    if (lookup.httpsEc && !isNoRecord(lookup.httpsEc) && lookup.httpsEc != lookup.ec)
       failure += (failure.empty() ? "" : "; ") + ("HTTPS: " + lookup.httpsEc.message());
 
-   std::println("{:{}}  {:15}  {:39}  {}{}", host, width, first(true), first(false),
-                https.empty() ? "-" : https, failure.empty() ? "" : std::format("  ({})", failure));
+   std::println("{}  {}  {}  {}{}", colored(std::format("{:{}}", host, width), Color::name),
+                first(true, 15), first(false, 39), https.empty() ? "-" : https,
+                failure.empty() ? "" : std::format("  ({})", failure));
 
    //
    // The rows are the progress report as well. Only a terminal gets each line as it is written,
@@ -488,6 +534,13 @@ int main(int argc, char* argv[])
    auto config = parseConfig(argc, argv);
    if (!config)
       return config.error();
+
+   //
+   // spdlog makes up its own mind about the terminal, so it has to be told as well.
+   //
+   useColor = config->color || isatty(STDOUT_FILENO);
+   if (config->color)
+      spdlog::set_default_logger(spdlog::stdout_color_mt("resolve", spdlog::color_mode::always));
 
    spdlog::set_pattern("%H:%M:%S.%e %^%l%$ %v");
    spdlog::set_level(config->verbose ? spdlog::level::debug : spdlog::level::info);
