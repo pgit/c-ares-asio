@@ -189,15 +189,38 @@ easiest to follow with `-v`), `--ordered` keeps the output in the order the name
 `--color` keeps the colours where the output does not go to a terminal (`| less -R`), `--help`
 lists all options.
 
-`--dot` resolves over DNS over TLS. Since `--server` takes an address, there is no name to check
-the certificate against unless `--tls-hostname` gives one -- pass it, or `--tls-no-verify` to skip
-the check:
+`--dot` resolves over DNS over TLS, which needs a name to check the server's certificate against.
+The short way is to give `--server` that name instead of an address: it is what goes into SNI and
+what the certificate has to be for. c-ares takes addresses for its servers and nothing else, so
+the name is looked up first -- the regular way, in the clear, of the servers from
+`/etc/resolv.conf`, on a channel of its own that is gone again before the first query proper:
 
 ```sh
-$ build/src/resolve -v --dot --server 1.1.1.1 --tls-hostname one.one.one.one www.google.com
-13:32:16.573 debug using DNS server(s) 1.1.1.1:853
-13:32:16.623 debug fd=8 TLS established: TLSv1.3 TLS_AES_256_GCM_SHA384
-13:32:16.642 info www.google.com: 142.251.157.119
+$ build/src/resolve -v --dot --server dns.google www.google.com
+21:11:14.293 debug looking up DNS server dns.google...
+21:11:14.293 debug ares_getaddrinfo(dns.google, )...
+21:11:14.312 debug ares_getaddrinfo: Successful completion (0 timeout(s))
+21:11:14.313 debug using DNS server(s) 8.8.4.4:853
+...
+21:11:14.377 info fd=8 TLS established: TLSv1.3, cipher=TLS_AES_128_GCM_SHA256, group=X25519MLKEM768
+21:11:14.377 info fd=8 TLS peer: subject=CN=dns.google, issuer=CN=WE2,O=Google Trust Services,C=US, verified
+...
+```
+
+Of the addresses the name has, only the first becomes a server. All of them would look like
+failover for free, but c-ares gives every query its three tries once *per server*, with the timeout
+doubling each time round: a name nobody has an answer for is given up on after 3 attempts with one
+server and after 12 with the four that `one.one.one.one` comes to, which took the 1000 names of
+the list above from under 3 s to 8 s and more -- nearly all of it spent waiting for a handful of
+them.
+
+An address on `--server` is no name to check anything against, so there `--tls-hostname` has to
+give one -- as it has to where `--server` names several hosts, of which none is the one for all of
+the servers. `--tls-hostname` also wins over the name on `--server` wherever both are given, and
+`--tls-no-verify` skips the check altogether:
+
+```sh
+$ build/src/resolve --dot --server 1.1.1.1 --tls-hostname one.one.one.one www.google.com
 ...
 
 $ build/src/resolve --dot --server 1.1.1.1 --tls-hostname wrong.example.com www.google.com
@@ -205,7 +228,8 @@ $ build/src/resolve --dot --server 1.1.1.1 --tls-hostname wrong.example.com www.
 13:32:27.624 error www.google.com: Could not contact DNS servers
 ```
 
-`--server` overrides the servers from `/etc/resolv.conf` (c-ares only), which is the easy way to
+`--server` overrides the servers from `/etc/resolv.conf` (c-ares only), by address or by name,
+with or without `--dot`, and with a port behind either (`dns.google:53`). It is the easy way to
 watch the retry and timeout handling do its thing -- 192.0.2.1 is reserved for documentation and
 goes nowhere:
 

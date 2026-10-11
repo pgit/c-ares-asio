@@ -12,6 +12,7 @@
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -38,6 +39,7 @@
 #include <iostream>
 #include <optional>
 #include <print>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -120,6 +122,70 @@ bool readHosts(const std::string& path, std::vector<std::string>& hosts)
    return !file.bad();
 }
 
+//
+// The entries of the comma separated --server list.
+//
+std::vector<std::string_view> serversOf(std::string_view list)
+{
+   std::vector<std::string_view> servers;
+   for (const auto part : std::views::split(list, ','))
+   {
+      const std::string_view server(part);
+      if (const auto first = server.find_first_not_of(" \t"); first != std::string_view::npos)
+         servers.push_back(server.substr(first, server.find_last_not_of(" \t") - first + 1));
+   }
+
+   return servers;
+}
+
+//
+// A --server entry that is a host name, and the port behind it -- colon included -- if there is
+// one.
+//
+struct ServerName
+{
+   std::string_view name;
+   std::string_view port;
+};
+
+//
+// Tells the names on --server from the addresses, which are all c-ares takes for a server:
+// "192.0.2.1", "192.0.2.1:5353", "[::1]:5353", "fe80::1%eth0" or a dns:// URI. Whatever is none of
+// these is a name, with or without a port.
+//
+std::optional<ServerName> serverName(std::string_view server)
+{
+   if (server.contains("://") || server.contains('[') || server.contains('%'))
+      return std::nullopt;
+
+   const auto colon = server.find(':');
+   if (colon != server.rfind(':'))
+      return std::nullopt; // a bare IPv6 address, which has several colons and no port
+
+   const auto name = server.substr(0, colon);
+   boost::system::error_code notAnAddress;
+   if (name.empty() || (ip::make_address(name, notAnAddress), !notAnAddress))
+      return std::nullopt;
+
+   return ServerName{name, colon == std::string_view::npos ? "" : server.substr(colon)};
+}
+
+//
+// The host names among the servers, each of them once.
+//
+std::vector<std::string> serverNames(std::string_view servers)
+{
+   std::vector<std::string> names;
+   for (const auto server : serversOf(servers))
+   {
+      const auto named = serverName(server);
+      if (named && !std::ranges::contains(names, named->name))
+         names.emplace_back(named->name);
+   }
+
+   return names;
+}
+
 std::expected<Config, int> parseConfig(int argc, char* argv[])
 {
    Config config;
@@ -133,13 +199,13 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
         "service name or port number to resolve for");
    opts("server,n", po::value(&config.servers),
         "DNS server(s) to query instead of the ones from /etc/resolv.conf, comma separated "
-        "(c-ares only) -- try 192.0.2.1 for a black hole");
+        "addresses or host names (c-ares only) -- try 192.0.2.1 for a black hole");
    opts("dot,t", po::bool_switch(&config.tls.enabled),
         "use DNS over TLS (RFC 7858) -- forces TCP and moves the servers to port 853 (c-ares "
         "only)");
    opts("tls-hostname", po::value(&config.tls.hostname),
         "server name to use for SNI and to verify the certificate against, e.g. "
-        "one.one.one.one");
+        "one.one.one.one -- a host name given as --server is used unless told otherwise");
    opts("tls-no-verify",
         po::value<bool>()->zero_tokens()->notifier([&config](bool) { config.tls.verify = false; }),
         "accept any certificate (testing only)");
@@ -204,16 +270,28 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
       }
 
       //
-      // --server takes an address, so there is no name to check the certificate against unless
-      // one is given. Rather than quietly talk to whoever answers, say so.
+      // A server given by name has said what its certificate is for already, and saying it a
+      // second time is a chore. An address is no name to check a certificate against, though, and
+      // of several names none is the one for all of the servers -- rather than quietly talk to
+      // whoever answers, say so.
       //
-      if (config.tls.verify && config.tls.hostname.empty())
+      if (config.tls.hostname.empty())
       {
-         std::cerr << "--dot needs --tls-hostname to verify the server certificate against, "
-                      "or --tls-no-verify to skip the check"
-                   << std::endl
-                   << desc;
-         return std::unexpected(EXIT_FAILURE);
+         const auto names = serverNames(config.servers);
+         if (names.size() == 1)
+         {
+            config.tls.hostname = names.front();
+         }
+         else if (config.tls.verify)
+         {
+            std::cerr << (names.empty() ? "--dot needs a name to verify the server certificate "
+                                          "against: a host name as --server, or --tls-hostname"
+                                        : "--server names several hosts, so --dot needs "
+                                          "--tls-hostname to verify their certificates against")
+                      << ", or --tls-no-verify to skip the check" << std::endl
+                      << desc;
+            return std::unexpected(EXIT_FAILURE);
+         }
       }
    }
    else if (!config.tls.hostname.empty() || !config.tls.verify)
@@ -514,12 +592,73 @@ awaitable<Lookup> lookupWithAres(AresResolver& resolver, const Config& config,
    co_return Lookup{ec, std::move(endpoints), httpsEc, std::move(records)};
 }
 
+//
+// c-ares takes addresses for its servers and nothing else, so a name on --server has to be looked
+// up before there is anybody to ask -- the regular way, of the servers from /etc/resolv.conf and
+// in the clear, whatever the queries proper are meant to go out as. Returns nothing if a name
+// cannot be looked up, having said why.
+//
+awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
+{
+   std::optional<AresResolver> resolver; // only if there is a name to look up at all
+   std::string addresses;
+
+   for (const auto server : serversOf(servers))
+   {
+      const auto add = [&](std::string_view address) {
+         addresses += addresses.empty() ? "" : ",";
+         addresses += address;
+      };
+
+      const auto named = serverName(server);
+      if (!named)
+      {
+         add(server);
+         continue;
+      }
+
+      if (!resolver)
+         resolver.emplace(co_await this_coro::executor);
+
+      spdlog::debug("looking up DNS server {}...", named->name);
+      const auto [ec, endpoints] = co_await resolver->async_resolve(named->name, "", as_tuple);
+      if (ec || endpoints.empty())
+      {
+         if (ec != error::operation_aborted)
+            spdlog::error("--server {}: {}", named->name,
+                          ec ? ec.message() : make_ares_error(ARES_ENODATA).message());
+         co_return std::nullopt;
+      }
+
+      //
+      // Only the first address the name has becomes a server -- the one c-ares sorted to the
+      // front as the best to reach from here. Taking them all looks like failover for free, but
+      // c-ares gives every query its tries once per server, with the timeout doubling each time
+      // round: a name nobody has an answer for is given up on after 3 attempts with one server
+      // and after 12 with the four a public resolver's name comes to, and a long list of names
+      // then spends most of its time waiting for those.
+      //
+      // An IPv6 address only needs its brackets once there is a port behind it.
+      //
+      const auto first = endpoints.front().address();
+      add(named->port.empty() ? first.to_string()
+          : first.is_v6()     ? std::format("[{}]{}", first.to_string(), named->port)
+                              : first.to_string() + std::string(named->port));
+   }
+
+   co_return addresses;
+}
+
 awaitable<void> resolveWithAres(const Config& config)
 {
    co_await this_coro::throw_if_cancelled(false);
 
+   const auto servers = co_await lookupServers(config.servers);
+   if (!servers)
+      co_return;
+
    AresResolver resolver(co_await this_coro::executor, config.tls);
-   if (auto ec = resolver.setServers(config.servers))
+   if (auto ec = resolver.setServers(*servers))
    {
       spdlog::error("--server '{}': {}", config.servers, ec.message());
       co_return;

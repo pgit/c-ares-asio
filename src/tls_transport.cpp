@@ -283,7 +283,7 @@ bool TlsTransport::startHandshake(Session& session, ares_socket_t fd)
 
    //
    // Without a name there is nothing to put in SNI and nothing to check the certificate against,
-   // which is why --dot insists on either --tls-hostname or --tls-no-verify.
+   // which is why --dot insists on a name, from --tls-hostname or --server, or on --tls-no-verify.
    //
    if (!m_options.hostname.empty())
    {
