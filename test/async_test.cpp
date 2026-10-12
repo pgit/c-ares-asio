@@ -7,6 +7,7 @@
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -15,9 +16,11 @@
 #include <boost/system/system_error.hpp>
 
 #include <cstdlib>
+#include <format>
 #include <memory>
 #include <optional>
 #include <thread>
+#include <vector>
 
 using namespace boost::asio;
 using boost::system::error_code;
@@ -184,6 +187,55 @@ TEST_F(Async, KeepsTheContextRunningUntilItIsDone)
    other.run();
    ASSERT_TRUE(result.has_value());
    EXPECT_FALSE(*result) << result->message();
+}
+
+TEST(Strand, ServesAContextThatRunsOnSeveralThreads)
+{
+   //
+   // A resolver is not for several threads at once, and a strand is how ASIO keeps them off one
+   // another: as the resolver's executor it serializes everything the resolver does by itself,
+   // and the lookups are started from inside it. The server gets a strand of its own.
+   //
+   io_context context;
+   fake_dns_server server(make_strand(context));
+
+   constexpr int count = 200;
+   for (int i = 0; i < count; ++i)
+      server.add_address(std::format("host{}.example.test", i), std::format("192.0.2.{}", i));
+
+   const auto strand = make_strand(context);
+   std::optional<cares_asio::resolver> resolver(std::in_place, strand);
+   ASSERT_FALSE(resolver->set_servers(server.address()));
+
+   const auto lookups = [&]() -> awaitable<int> {
+      int resolved = 0;
+      for (int i = 0; i < count; ++i)
+      {
+         const auto [ec, endpoints] = co_await resolver->async_resolve(
+            std::format("host{}.example.test", i), "443", as_tuple(use_awaitable));
+
+         if (!ec && endpoints.size() == 1 &&
+             endpoints.front().address() == ip::make_address(std::format("192.0.2.{}", i)))
+            ++resolved;
+      }
+
+      resolver.reset(); // in the strand as well
+      co_return resolved;
+   };
+
+   auto resolved = co_spawn(strand, lookups(), use_future);
+
+   std::vector<std::thread> threads;
+   for (int i = 0; i < 4; ++i)
+      threads.emplace_back([&] { context.run_for(std::chrono::seconds(20)); });
+
+   const bool done = resolved.wait_for(std::chrono::seconds(20)) == std::future_status::ready;
+   context.stop();
+   for (auto& thread : threads)
+      thread.join();
+
+   ASSERT_TRUE(done);
+   EXPECT_EQ(resolved.get(), count);
 }
 
 // --------------------------------------------------------------------------------------------------
