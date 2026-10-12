@@ -333,7 +333,7 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
 // --------------------------------------------------------------------------------------------------
 
 resolver::resolver(executor_type executor, const tls_options& tls)
-   : m_executor(std::move(executor)), m_timer(m_executor)
+   : m_executor(std::move(executor)), m_timer(std::make_shared<steady_timer>(m_executor))
 {
    if (int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
       throw boost::system::system_error(make_ares_error(status), "ares_library_init");
@@ -407,7 +407,7 @@ resolver::~resolver()
 {
    ares_destroy(m_channel); // fails pending queries with ARES_EDESTRUCTION and closes all sockets
    m_sockets.clear();
-   m_timer.cancel();
+   m_timer->cancel();
    ares_library_cleanup();
 }
 
@@ -483,6 +483,9 @@ void resolver::start_resolve_https(std::string host, https_handler handler)
    // function, not anything the name could have done.
    //
    detail::log_error(m_logger, "HTTPS query for {}: {}", host, ares_strerror(status));
+   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
+      slot.clear();
+
    post(m_executor,
         append(std::move(request->handler), make_ares_error(status), https_results_type()));
 }
@@ -528,6 +531,13 @@ void resolver::arm(const std::shared_ptr<socket_watch>& socket)
       return;
 
    //
+   // The handlers below find their way back through the socket rather than through 'this'. A
+   // wait that is cancelled may have completed already, with its handler on its way, and by the
+   // time that one runs the socket may be gone -- and the resolver with it, which is where every
+   // socket goes in the end. So a socket that is still there says the resolver is, too.
+   //
+
+   //
    // While the handshake is in flight the socket is ours, not c-ares'. Waiting on what c-ares
    // asked for would be wrong in both directions: a handshake that wants to read gets starved,
    // and one that wants to read while c-ares waits for writability spins, because a connected
@@ -544,7 +554,8 @@ void resolver::arm(const std::shared_ptr<socket_watch>& socket)
       socket->waiting_read = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_read,
                                     [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       on_socket_event(weak, ARES_FD_EVENT_READ, ec);
+                                       if (const auto socket = weak.lock())
+                                          on_socket_event(socket, ARES_FD_EVENT_READ, ec);
                                     });
    }
 
@@ -553,18 +564,15 @@ void resolver::arm(const std::shared_ptr<socket_watch>& socket)
       socket->waiting_write = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_write,
                                     [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       on_socket_event(weak, ARES_FD_EVENT_WRITE, ec);
+                                       if (const auto socket = weak.lock())
+                                          on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
                                     });
    }
 }
 
-void resolver::on_socket_event(const std::weak_ptr<socket_watch>& weak, unsigned int event,
+void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsigned int event,
                                const error_code& ec)
 {
-   auto socket = weak.lock();
-   if (!socket)
-      return; // socket is gone, and so is c-ares' interest in it
-
    (event == ARES_FD_EVENT_READ ? socket->waiting_read : socket->waiting_write) = false;
 
    if (ec)
@@ -606,15 +614,21 @@ void resolver::update_timeout()
    timeval tv{};
    if (ares_timeout(m_channel, nullptr, &tv) == nullptr)
    {
-      m_timer.cancel(); // nothing in flight
+      m_timer->cancel(); // nothing in flight
       return;
    }
 
    using namespace std::chrono;
-   m_timer.expires_after(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
-   m_timer.async_wait([this](const error_code& ec) {
-      if (ec)
-         return; // superseded by a later timeout, or cancelled
+   m_timer->expires_after(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
+
+   //
+   // Cancelling the timer does nothing for a wait that has completed already and only has its
+   // handler left to run, and the resolver may be gone before that happens. The timer goes with
+   // it, which is what the handler looks at before anything else.
+   //
+   m_timer->async_wait([this, weak = std::weak_ptr(m_timer)](const error_code& ec) {
+      if (ec || weak.expired())
+         return; // superseded by a later timeout, cancelled, or left behind by the resolver
 
       detail::log_debug(m_logger, "query timeout");
       ares_process_fds(m_channel, nullptr, 0, ARES_PROCESS_FLAG_NONE);

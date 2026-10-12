@@ -160,13 +160,13 @@ private:
    void on_socket_state(ares_socket_t fd, bool readable, bool writable);
 
    void arm(const std::shared_ptr<socket_watch>& socket);
-   void on_socket_event(const std::weak_ptr<socket_watch>& weak, unsigned int event,
+   void on_socket_event(const std::shared_ptr<socket_watch>& socket, unsigned int event,
                         const boost::system::error_code& ec);
 
    void update_timeout();
 
    executor_type m_executor;
-   boost::asio::steady_timer m_timer;
+   std::shared_ptr<boost::asio::steady_timer> m_timer; // shared for update_timeout() to tell
    ares_channel_t* m_channel = nullptr;
    log_function m_logger; // declared ahead of the transport, which keeps a reference to it
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for

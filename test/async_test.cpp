@@ -9,12 +9,15 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/deferred.hpp>
 #include <boost/asio/error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/system/system_error.hpp>
 
+#include <cstdlib>
 #include <memory>
 #include <optional>
+#include <thread>
 
 using namespace boost::asio;
 using boost::system::error_code;
@@ -293,6 +296,47 @@ TEST_F(Cancellation, IsNothingToAnOperationThatIsDone)
    EXPECT_FALSE(ec) << ec.message();
 }
 
+TEST_F(Cancellation, IsNothingOnceTheResolverIsGone)
+{
+   //
+   // A signal outlives the operations it was bound to, and may be raised long after: when the
+   // one that was answered, the one that failed without a query and the one that was still
+   // pending have all completed, and the resolver they would cancel is no more.
+   //
+   server.add_address("slow.example.test", "192.0.2.2");
+
+   cancellation_signal answered, failed, pending;
+   int completed = 0;
+   {
+      auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+      ASSERT_FALSE(doomed->set_servers(server.address()));
+
+      doomed->async_resolve(
+         "www.example.test", "443",
+         bind_cancellation_slot(answered.slot(),
+                                [&](error_code, const results_type&) { ++completed; }));
+      doomed->async_resolve_https(
+         std::string(64, 'a') + ".example.test",
+         bind_cancellation_slot(failed.slot(),
+                                [&](error_code, const https_results_type&) { ++completed; }));
+
+      ASSERT_TRUE(run_until(context, [&] { return completed == 2; }));
+
+      server.set_silent(true);
+      doomed->async_resolve(
+         "slow.example.test", "443",
+         bind_cancellation_slot(pending.slot(),
+                                [&](error_code, const results_type&) { ++completed; }));
+   }
+
+   ASSERT_TRUE(run_until(context, [&] { return completed == 3; }));
+
+   answered.emit(cancellation_type::terminal);
+   failed.emit(cancellation_type::terminal);
+   pending.emit(cancellation_type::terminal);
+   context.poll();
+}
+
 // --------------------------------------------------------------------------------------------------
 
 using Lifetime = Async;
@@ -343,6 +387,41 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
 
    ASSERT_TRUE(run_until(other, [&] { return result.has_value(); }));
    EXPECT_EQ(*result, error::operation_aborted);
+}
+
+TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
+{
+   //
+   // Two timers that are both due by the time the context gets to run again: one of the test's
+   // and, a little after it, the timeout c-ares asked the resolver for. The context takes them
+   // off its queue together and runs them in that order -- and the first one does away with the
+   // resolver. Cancelling a timer does nothing for a handler that is on its way already, so the
+   // second one still runs, and it had better not look for the resolver it belonged to.
+   //
+   // The resolver lives on the heap for the sake of the address sanitizer, which knows about
+   // memory that was given back.
+   //
+   ASSERT_EQ(::setenv("RES_OPTIONS", "timeout:1 attempts:1", 1), 0);
+   auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+   ASSERT_EQ(::unsetenv("RES_OPTIONS"), 0);
+
+   ASSERT_FALSE(doomed->set_servers(server.address()));
+   server.set_silent(true);
+
+   std::optional<error_code> result;
+   doomed->async_resolve("www.example.test", "443",
+                         [&](error_code ec, const results_type&) { result = ec; });
+
+   steady_timer earlier(context, std::chrono::milliseconds(500));
+   earlier.async_wait([&](error_code) { doomed.reset(); });
+
+   std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+
+   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   EXPECT_EQ(*result, error::operation_aborted);
+   EXPECT_EQ(doomed, nullptr);
+
+   context.poll(); // whatever else was on its way
 }
 
 TEST_F(Lifetime, CanGoWithNothingEverAsked)
