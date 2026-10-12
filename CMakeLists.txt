@@ -7,14 +7,19 @@ project(
     HOMEPAGE_URL "https://github.com/pgit/c-ares-asio"
     LANGUAGES CXX)
 
+if (WIN32)
+    message(FATAL_ERROR "cares_asio waits on its sockets as POSIX descriptors, which Windows "
+                        "does not have.")
+endif()
+
 # there are no C++ modules in here, so there is nothing for CMake to scan the sources for
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # --------------------------------------------------------------------------------------------------
 #
-# Options. Tests and examples are the business of whoever works on the library itself, so they
-# are only on by default where this is the top-level project -- not where it came in through
-# add_subdirectory() or FetchContent.
+# Options. Tests, examples and documentation are the business of whoever works on the library
+# itself, so they are only on by default where this is the top-level project -- not where it came
+# in through add_subdirectory() or FetchContent.
 #
 # Nothing in here sets a compiler, a standard library or warning flags: that is up to the one who
 # builds, and CMakePresets.json has what this repository is developed with.
@@ -27,6 +32,8 @@ endif()
 
 option(CARES_ASIO_BUILD_TESTS "Build the tests of cares_asio" ${cares_asio_tests_default})
 option(CARES_ASIO_BUILD_EXAMPLES "Build the examples of cares_asio" ${PROJECT_IS_TOP_LEVEL})
+option(CARES_ASIO_BUILD_DOCS "Add the 'docs' target, where MrDocs is there to make them"
+       ${PROJECT_IS_TOP_LEVEL})
 option(CARES_ASIO_INSTALL "Generate the install rules of cares_asio" ${PROJECT_IS_TOP_LEVEL})
 
 #
@@ -152,4 +159,8 @@ endif()
 if (CARES_ASIO_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if (CARES_ASIO_BUILD_DOCS)
+    add_subdirectory(doc)
 endif()

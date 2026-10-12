@@ -112,7 +112,7 @@ std::string peer_info(SSL* ssl)
       return "no peer certificate";
 
    //
-   // With --tls-no-verify the chain is not checked at all, so do not pretend it was.
+   // Where verification is off the chain is not checked at all, so do not pretend it was.
    //
    const bool verified =
       SSL_get_verify_mode(ssl) != SSL_VERIFY_NONE && SSL_get_verify_result(ssl) == X509_V_OK;
@@ -287,7 +287,8 @@ bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
 
    //
    // Without a name there is nothing to put in SNI and nothing to check the certificate against,
-   // which is why --dot insists on a name, from --tls-hostname or --server, or on --tls-no-verify.
+   // which leaves the chain: the certificate is then one to trust, though not known to be the
+   // server's. That is the caller's decision, see tls_options::hostname.
    //
    if (!m_options.hostname.empty())
    {

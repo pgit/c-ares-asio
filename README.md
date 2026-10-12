@@ -1,243 +1,171 @@
-# c-ares-asio
+# cares_asio
 
-Scratch project for experimenting with [c-ares](https://c-ares.org/) integration into
-[Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html).
+[c-ares](https://c-ares.org/) name resolution as
+[Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) asynchronous
+operations.
 
-`resolve` looks up the host names given on the command line, or those of the URLs listed in a
-file, several at a time. By default it uses c-ares, driven by the ASIO event loop; with `--asio` it
-uses ASIO's own `ip::tcp::resolver` instead, which runs `getaddrinfo()` on an internal thread. Both
-should print the same addresses -- only the c-ares path also looks up the HTTPS record, since
-`getaddrinfo()` answers with addresses and nothing else.
+ASIO's own `ip::tcp::resolver` runs `getaddrinfo()` on an internal thread: one lookup at a time,
+blocking, and with addresses for an answer and nothing else. `cares_asio::resolver` has c-ares do
+the asking instead, driven by the event loop of the application -- no thread of its own, any
+number of lookups in flight at once, and more to ask for than addresses:
 
-## How the integration works
+* **addresses** of a host name, as endpoints to connect to;
+* **HTTPS records** ([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460)), which tell a client
+  which protocols an endpoint speaks before it connects;
+* over UDP and TCP, or over **DNS over TLS** ([RFC 7858](https://www.rfc-editor.org/rfc/rfc7858)),
+  which c-ares has no transport for by itself;
+* as operations that take any completion token -- `use_awaitable`, `deferred`, `use_future`, a
+  callback -- and can be cancelled.
 
-[`src/ares_resolver.cpp`](src/ares_resolver.cpp) holds all of it:
+## Example
 
-* the channel is created with `ARES_OPT_SOCK_STATE_CB`, so c-ares reports every socket it opens,
-  closes, or changes its read/write interest on -- no c-ares event thread is involved;
-* each such socket is wrapped in a non-owning `posix::stream_descriptor`, and readiness is awaited
-  with `async_wait()`. The descriptor is `release()`d before c-ares closes the socket;
-* readiness is fed back with [`ares_process_fds()`](https://c-ares.org/docs/ares_process_fds.html).
-  Since the socket state callback only fires on *changes*, the waits are re-armed after every call;
-* `ares_timeout()` drives a `steady_timer`, whose expiry calls `ares_process_fds()` with no events.
+```cpp
+#include <cares_asio.hpp>
 
-Queries are exposed as a regular ASIO asynchronous operation (`async_resolve()` via
-`async_initiate`), so they work with `use_awaitable`, `as_tuple`, callbacks and futures alike.
+#include <boost/asio.hpp>
 
-Cancellation works too (`Ctrl-C` interrupts a lookup cleanly), but only bluntly: c-ares has no
-handle for an individual `ares_getaddrinfo()` request, so the cancellation slot calls
-`ares_cancel()`, which takes every pending query on the channel with it -- the lookups of every
-other name in flight included. That is exactly what `Ctrl-C` is after, and nothing else here
-cancels.
+#include <iostream>
 
-That puts some weight on `ares_cancel()`, which is worth knowing about:
-[GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542)
-is a use-after-free/double-free in c-ares' query-completion handling, where a query's callback
-runs while the query is still linked into the channel, and one of the two documented triggers is
-an application calling `ares_cancel()`. It affects everything after 1.32.3 and is fixed in
-**1.34.7** -- the devcontainer currently installs Debian's `libcares2`, which is 1.34.5.
+namespace asio = boost::asio;
 
-Not done yet: batching several ready descriptors into a single `ares_process_fds()` call -- ASIO
-delivers one completion handler per descriptor, so each one currently triggers its own call.
+asio::awaitable<void> lookup(std::string host)
+{
+   cares_asio::resolver resolver(co_await asio::this_coro::executor);
 
-## HTTPS records
+   const auto [ec, endpoints] =
+      co_await resolver.async_resolve(host, "443", asio::as_tuple(asio::use_awaitable));
 
-Besides the addresses, every name is also looked up for its HTTPS record
-([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460), RR type 65) -- the record that tells a client
-which protocols an endpoint speaks before it connects.
+   if (ec)
+      std::cerr << host << ": " << ec.message() << '\n';
 
-The addresses and the record are two separate questions, so they go out *together* rather than one
-after the other -- c-ares has no trouble keeping several queries in flight on a channel, so the
-record costs no second round trip, and with `--dot` the two share the connection as well. The
-waiting is an [`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html)
-over the two operations; the printing stays in a fixed order so the output does not depend on
-which answer lands first.
+   for (const auto& endpoint : endpoints)
+      std::cout << host << ": " << endpoint << '\n';
+}
 
-Being separate questions, a name that has no addresses is still asked for its record. The
-exception is a name that cannot be encoded as a DNS name at all, which is no question for any
-record type: c-ares turns that one down locally without a query, but where `ares_getaddrinfo()`
-correctly says `ARES_EBADNAME`, `ares_search_dnsrec()` says `ARES_ENOMEM` (1.34.5) -- so the
-address error is the one reported, rather than a second line blaming memory for a typo.
-
-c-ares parses these itself: `ares_search_dnsrec()` asks the question the same way
-`ares_getaddrinfo()` does, search domains and all, and the answer comes back as an
-`ares_dns_record_t` rather than as bytes. The priority and target come straight off it, but the
-SvcParams are opaque values whose syntax depends on their key, so
-[`ares_resolver.cpp`](src/ares_resolver.cpp) asks `ares_dns_opt_get_datatype()` which wire format
-each one uses and renders it the way the RFC presents it:
-
-```sh
-$ build/src/resolve --server 1.1.1.1 cloudflare.com
-info cloudflare.com: 104.16.132.229
-info cloudflare.com: 2606:4700::6810:84e5
-...
-info cloudflare.com: HTTPS 1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5
+int main()
+{
+   asio::io_context context;
+   asio::co_spawn(context, lookup("example.com"), asio::detached);
+   context.run();
+}
 ```
 
-A name with no such record says so at `--verbose` and is otherwise quiet, which is the common
-case. Note that a resolver is free to answer type 65 with NODATA even where a record exists --
-the Docker Desktop resolver in this devcontainer does, which is what `--server` is for.
+[`example/minimal.cpp`](example/minimal.cpp) goes on to the HTTPS record, and
+[`example/resolve`](example/resolve) is a command line with everything else: many names at once,
+DNS over TLS, cancellation.
 
-## Many names at once
+## Requirements
 
-`--file` takes the names from a file of URLs instead, one per line. Only the host of each URL is of
-any interest -- scheme, port, path and the rest are dropped, nothing is ever connected to -- and a
-host that several URLs share is looked up once. The results come as one line per host: the name,
-its first IPv4 address, its first IPv6 address and its HTTPS record, with a dash for whatever there
-is none of and, in parentheses, whatever went wrong:
+* Linux. Sockets are waited on as POSIX descriptors, and nothing else has been tried.
+* A C++20 compiler and standard library. clang 23 with libc++ and GCC 14 with libstdc++ are the
+  ones the tests run with.
+* CMake 3.25 or later.
+* [Boost](https://www.boost.org/) 1.88 or later, of which only headers are used.
+* [c-ares](https://c-ares.org/) 1.34 or later. Make that 1.34.7 where lookups get cancelled: up
+  to there, `ares_cancel()` can run into
+  [GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542),
+  and CMake warns about it.
+* [OpenSSL](https://www.openssl.org/) 3.2 or later, or [AWS-LC](https://github.com/aws/aws-lc),
+  for DNS over TLS.
 
-```sh
-$ build/src/resolve --server 1.1.1.1 --file url_list.txt
-accounts.google.com                  142.251.127.84   2a00:1450:4001:c21::54                   -
-accounts.nintendo.com                23.2.13.51       -                                        -
-accounts.spotify.com                 151.101.131.42   2a04:4e42:600::810                       -
-...
-adsmanager.facebook.com              57.144.244.141   2a03:2880:f37a:8d:face:b00c:0:2          1 . alpn=h2,h3; 2 star.fallback.c10r.facebook.com alpn=h2,h3
-...
-serviceonline.bihar.gov.in           -                -                                        -  (Timeout while contacting DNS servers)
-...
-www.hobbylobby.com                   149.126.77.120   -                                        -  (HTTPS: DNS server returned general failure)
-...
+## Using it
+
+With the library installed, `find_package()` brings the target and everything it depends on:
+
+```cmake
+find_package(cares_asio 0.1 REQUIRED)
+
+target_link_libraries(app PRIVATE cares_asio::cares_asio)
 ```
 
-`--concurrency` (10 unless told otherwise) is the number of names in flight at any time, with or
-without `--file`. It is that many coroutines, each taking the next name off the list, waiting for
-its answer and coming back for more, held together by a ranged
-[`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html).
-There is still one channel and one thread: c-ares keeps all the queries apart by itself, over UDP
-as well as pipelined on the one connection `--dot` has. For the 1000 names of a list of popular
-sites, asked of 1.1.1.1:
+The target has the same name where the sources are part of the build instead, through
+`add_subdirectory()` or `FetchContent`. Tests, examples and documentation are left out then:
 
-| `--concurrency` | 1 | 10 | 50 |
-| --- | --- | --- | --- |
-| time | 84 s | 9 s | 3 s |
+```cmake
+include(FetchContent)
 
-Every name is printed the moment its answer is in, so the output doubles as the progress report --
-and comes in whatever order the answers land in. `--ordered` prints them in the order they were
-given instead, which makes two runs comparable line by line. The price is that a single name which
-takes its time, and a timeout is several seconds, holds back every row behind it: none of the
-lookups, but all of the progress.
+FetchContent_Declare(
+    cares_asio
+    GIT_REPOSITORY https://github.com/pgit/c-ares-asio.git
+    GIT_TAG <tag or commit>)
+FetchContent_MakeAvailable(cares_asio)
 
-With `--asio`, the number makes no difference: `getaddrinfo()` blocks, ASIO calls it on a single
-thread unless its `resolver.threads` configuration says otherwise, and however many lookups are
-handed over at once, they are answered one after the other.
+target_link_libraries(app PRIVATE cares_asio::cares_asio)
+```
 
-## DNS over TLS
+Either way the target asks for C++20 and brings the include paths of Boost and c-ares with it,
+whose status codes are what a failed lookup is compared against. The TLS library stays out of
+sight: no header of the library includes one of its.
 
-c-ares has no encrypted transport of its own. [`ares_set_servers_csv()`](https://c-ares.org/docs/ares_set_servers_csv.html)
-documents `dns+tls://` (port 853) and `dns+https://` (port 443) alongside `dns://`, but, in its own
-words, "the underlying implementations for those features do not yet exist and therefore will
-result in errors if they are attempted to be used" -- the parser rejects both with `ARES_EBADSTR`,
-in 1.34.5 as in 1.34.8. The only TLS-related things it does have are the `TLSA` and `HTTPS` record
-*types*, which are things to ask about, not ways to ask.
+| Option | Default | |
+| --- | --- | --- |
+| `CARES_ASIO_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
+| `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
+| `CARES_ASIO_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
+| `CARES_ASIO_BUILD_EXAMPLES` | top-level only | Builds the examples. |
+| `CARES_ASIO_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
+| `CARES_ASIO_INSTALL` | top-level only | Generates the install rules. |
 
-What it does have is [`ares_set_socket_functions_ex()`](https://c-ares.org/docs/ares_set_socket_functions_ex.html),
-which replaces its socket layer wholesale. DNS over TCP is a length-prefixed byte stream and c-ares
-does that framing itself, so wrapping the stream in TLS is enough to make it DNS over TLS
-([RFC 7858](https://www.rfc-editor.org/rfc/rfc7858)). That is what
-[`src/tls_transport.cpp`](src/tls_transport.cpp) does, against the OpenSSL API:
+## Building, testing, installing
 
-* `--dot` puts the channel in `ARES_FLAG_USEVC | ARES_FLAG_STAYOPEN` -- TCP only, and the
-  connection outlives the query, because otherwise it is a handshake per name;
-* the servers move to port 853. A port spelled out on `--server` is taken at face value, the ones
-  that came from `/etc/resolv.conf` with `:53` on them are moved regardless;
-* `asocket()` creates the socket and remembers it, `arecvfrom()`/`asendto()` become `SSL_read()`
-  and `SSL_write()`, and TCP fast open is refused with `ENOSYS` -- it would defer the connect to
-  the first write, and the first write is the one that needs a finished handshake.
-
-The handshake itself is deliberately *not* driven from those callbacks. c-ares decides what to wait
-for from the queries it has pending, which has nothing to do with what the TLS library needs next,
-and answering a write-readiness event with `EAGAIN` because the handshake wants to read would just
-spin -- a connected socket is writable nearly always. So `AresResolver::onSocketEvent()` calls
-`TlsTransport::advance()` first, waits on whatever `SSL_connect()` asked for, and only lets c-ares
-see the socket once there is a session on it. A handshake that fails leaves the socket poisoned,
-and the next `SSL_read()` reports `ECONNRESET` so that c-ares fails the server the usual way.
-
-DoH would need HTTP/2 framing and a request/response translation on top, which is a much worse fit
-for a byte-stream hook -- it is not done here.
-
-## Building
-
-The devcontainer brings the whole toolchain (clang, libc++, Boost, spdlog, c-ares, OpenSSL, AWS-LC).
+The build files set no compiler and no flags of their own. What the repository is developed with
+is in [`CMakePresets.json`](CMakePresets.json), for the toolchain that the devcontainer brings
+(clang, libc++, Boost, c-ares, OpenSSL, AWS-LC, GoogleTest):
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+| Preset | Directory | |
+| --- | --- | --- |
+| `dev` | `build` | Debug, AWS-LC. The one to work with. |
+| `release` | `build-release` | The same, optimized. |
+| `asan` | `build-asan` | With the address and undefined behaviour sanitizers. |
+| `tsan` | `build-tsan` | With the thread sanitizer. |
+| `openssl` | `build-openssl` | OpenSSL instead of AWS-LC, and the library as a shared one. |
+| `gcc` | `build-gcc` | GCC and libstdc++. |
+
+Anywhere else it is a CMake project like any other:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+ctest --test-dir build
+cmake --install build --prefix /usr/local
 ```
 
-The TLS library is `-DTLS_LIBRARY=AWS-LC` (the default, a static build the devcontainer keeps in
-`/opt/boringssl` -- `-DBORINGSSL_ROOT=` points elsewhere) or `-DTLS_LIBRARY=OpenSSL` (the system
-one, shared). The transport uses nothing beyond the OpenSSL API that AWS-LC implements too, so the
-switch is a link-time one: no source file knows which of the two it got.
+The tests need no network. They ask a DNS server of their own, which runs in the test on the
+loopback interface and answers over UDP, TCP and TLS. [GoogleTest](https://github.com/google/googletest)
+is used where it is installed and fetched where it is not. Two of the tests build a project of
+their own, [`test/cmake_test`](test/cmake_test), against the installed library and against the
+source tree -- which is what keeps the two CMake snippets above true.
 
-## Running
+## Documentation
 
-```sh
-$ build/src/resolve -v localhost www.google.com
-07:23:23.351 debug resolving localhost:80...
-07:23:23.351 debug ares_getaddrinfo(localhost, 80)...
-07:23:23.351 debug ares_getaddrinfo: Successful completion (0 timeout(s))
-07:23:23.351 info localhost: ::1
-07:23:23.351 info localhost: 127.0.0.1
-...
-```
+* The reference is made from the comments in [`include/cares_asio`](include/cares_asio) by
+  [MrDocs](https://www.mrdocs.com): `cmake --build build --target docs`, see [doc](doc/README.md).
+* [How the integration works](doc/design.md): c-ares in an ASIO event loop.
+* [HTTPS records](doc/https-records.md)
+* [DNS over TLS](doc/dns-over-tls.md)
 
-`--service` selects the service name or port number to resolve for, `--asio` switches to the ASIO
-resolver, `--file` reads the names from a file of URLs, `--concurrency` sets how many of them are
-looked up at the same time (`--concurrency 1` for strictly one after the other, which is the
-easiest to follow with `-v`), `--ordered` keeps the output in the order the names were given,
-`--color` keeps the colours where the output does not go to a terminal (`| less -R`), `--help`
-lists all options.
+## Good to know
 
-`--dot` resolves over DNS over TLS, which needs a name to check the server's certificate against.
-The short way is to give `--server` that name instead of an address: it is what goes into SNI and
-what the certificate has to be for. c-ares takes addresses for its servers and nothing else, so
-the name is looked up first -- the regular way, in the clear, of the servers from
-`/etc/resolv.conf`, on a channel of its own that is gone again before the first query proper:
+* **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
+  what a cancellation slot can do is `ares_cancel()`, for the whole resolver. Every pending
+  operation then completes with `operation_aborted`.
+* **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
+  executor a strand and start the lookups from inside it.
+* **A lookup is not complete until the context ran its handler**, including where a resolver is
+  destroyed with lookups pending: they complete with `operation_aborted`, but not from inside
+  the destructor.
+* **The library does not log.** What it would have logged goes to the function given to
+  `resolver::set_logger()`, which is where the reason for a failed TLS handshake is to be found.
+* **There is no promise of a stable interface before 1.0.** The minor version is part of the name
+  of the shared library until then, and `find_package(cares_asio 0.1)` does not accept 0.2.
 
-```sh
-$ build/src/resolve -v --dot --server dns.google www.google.com
-21:11:14.293 debug looking up DNS server dns.google...
-21:11:14.293 debug ares_getaddrinfo(dns.google, )...
-21:11:14.312 debug ares_getaddrinfo: Successful completion (0 timeout(s))
-21:11:14.313 debug using DNS server(s) 8.8.4.4:853
-...
-21:11:14.377 info fd=8 TLS established: TLSv1.3, cipher=TLS_AES_128_GCM_SHA256, group=X25519MLKEM768
-21:11:14.377 info fd=8 TLS peer: subject=CN=dns.google, issuer=CN=WE2,O=Google Trust Services,C=US, verified
-...
-```
+## License
 
-Of the addresses the name has, only the first becomes a server. All of them would look like
-failover for free, but c-ares gives every query its three tries once *per server*, with the timeout
-doubling each time round: a name nobody has an answer for is given up on after 3 attempts with one
-server and after 12 with the four that `one.one.one.one` comes to, which took the 1000 names of
-the list above from under 3 s to 8 s and more -- nearly all of it spent waiting for a handful of
-them.
-
-An address on `--server` is no name to check anything against, so there `--tls-hostname` has to
-give one -- as it has to where `--server` names several hosts, of which none is the one for all of
-the servers. `--tls-hostname` also wins over the name on `--server` wherever both are given, and
-`--tls-no-verify` skips the check altogether:
-
-```sh
-$ build/src/resolve --dot --server 1.1.1.1 --tls-hostname one.one.one.one www.google.com
-...
-
-$ build/src/resolve --dot --server 1.1.1.1 --tls-hostname wrong.example.com www.google.com
-13:32:27.547 error TLS handshake failed: hostname mismatch
-13:32:27.624 error www.google.com: Could not contact DNS servers
-```
-
-`--server` overrides the servers from `/etc/resolv.conf` (c-ares only), by address or by name,
-with or without `--dot`, and with a port behind either (`dns.google:53`). It is the easy way to
-watch the retry and timeout handling do its thing -- 192.0.2.1 is reserved for documentation and
-goes nowhere:
-
-```sh
-$ build/src/resolve -v --server 192.0.2.1 www.google.com
-07:23:49.737 debug ares_getaddrinfo(www.google.com, 80)...
-07:23:49.737 debug socket state: fd=8 readable=true writable=false
-07:23:51.737 debug query timeout
-...
-07:24:01.506 error www.google.com: Timeout while contacting DNS servers
-```
+Distributed under the Boost Software License, Version 1.0. See [LICENSE_1_0.txt](LICENSE_1_0.txt)
+or https://www.boost.org/LICENSE_1_0.txt.

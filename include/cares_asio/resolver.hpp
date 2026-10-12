@@ -18,6 +18,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
 
 #include <ares.h>
 
@@ -38,93 +39,269 @@ class tls_transport;
 
 // --------------------------------------------------------------------------------------------------
 
-//
-// One HTTPS resource record (RFC 9460). A 'priority' of 0 is the alias form, where 'target' names
-// the host to continue at; anything else is the service form, where 'params' describes how to
-// reach the endpoint.
-//
+/** One HTTPS resource record (RFC 9460).
+
+    The record that tells a client which protocols an endpoint speaks before
+    it connects. It comes in two forms: with a @ref priority of 0 it is an
+    alias, where @ref target names the host to go on with, and with any other
+    it describes a service, where @ref params says how to reach it.
+
+    @see resolver::async_resolve_https
+ */
 struct https_record
 {
+   /** 0 for an alias. For a service, its place among the records of the
+       name: a client tries the lowest first.
+    */
    unsigned short priority = 0;
-   std::string target; // empty, or ".", for the record's own name
 
-   //
-   // The SvcParams, already in presentation form ("alpn=h3,h2", "ipv4hint=104.20.23.154"). Every
-   // key has its own value syntax and c-ares hands them over as opaque bytes, so there is not
-   // much to be gained from carrying them around any further apart.
-   //
+   /** The name to go on with. Empty, or ".", where that is the name the
+       record was found under.
+    */
+   std::string target;
+
+   /** The service parameters, in presentation form.
+
+       One string for each parameter, the way a zone file has it:
+       "alpn=h3,h2", "port=8443", "ipv4hint=192.0.2.1,192.0.2.2" -- or the
+       key alone for one that has no value, like "no-default-alpn". Every key
+       has a value syntax of its own and c-ares hands them over as opaque
+       bytes, so there is not much to be gained from carrying them around
+       any further apart.
+
+       A key that c-ares has no name for reads "key" and its number, and a
+       value it has no format for is given in hexadecimal, like that of
+       "ech".
+    */
    std::vector<std::string> params;
 };
 
-//
-// DNS over TLS (RFC 7858), which is off unless 'enabled' says otherwise.
-//
+/** Whether a @ref resolver uses DNS over TLS (RFC 7858), and how.
+
+    c-ares has no encrypted transport of its own. What the library does is
+    to put a TLS session under the TCP connections that c-ares opens, which
+    is all it takes to turn DNS over TCP into DNS over TLS.
+ */
 struct tls_options
 {
+   /** Sends every query over TLS: no UDP, and no TCP in the clear either. */
    bool enabled = false;
-   std::string hostname; // for SNI and certificate verification, empty if none was given
+
+   /** The name of the server, for SNI and for its certificate to be checked
+       against.
+
+       c-ares knows its servers by address and nothing else, so the name has
+       to come from here. Without one there is no SNI, and @ref verify still
+       checks that the certificate is one to trust but not whose it is --
+       which is no more than knowing that the server is somebody.
+    */
+   std::string hostname;
+
+   /** Whether the certificate of the server is verified, against the trust
+       store that the TLS library uses by default.
+
+       Without this any certificate is taken, and with it anybody who is in
+       a position to answer for the server. That is for testing.
+    */
    bool verify = true;
 };
 
-//
-// What the resolver has to say about its work goes to a function like this one, if set_logger()
-// was given any: the queries it starts and how they end, the sockets c-ares opens, and what the
-// TLS handshake negotiated or why it failed. The library itself writes nowhere.
-//
+/** How much a message from a @ref resolver matters.
+
+    @see log_function
+ */
 enum class log_level
 {
+   /** What is going on: queries, the sockets of c-ares, timeouts. */
    debug,
+
+   /** What may be worth knowing: a TLS session and whom it is with. */
    info,
+
+   /** What did not go as it should, but did go on. */
    warning,
+
+   /** What went wrong, and why: the reason a TLS handshake failed is one
+       that only ever shows here.
+    */
    error
 };
 
+/** Receives the messages of a @ref resolver.
+
+    The library does not write anywhere by itself. What it has to say goes
+    to a function like this one, with the level of the message and its text,
+    and is not even put together where there is none.
+
+    @see resolver::set_logger
+ */
 using log_function = std::function<void(log_level, std::string_view)>;
 
 // --------------------------------------------------------------------------------------------------
 
+/** Resolves host names with c-ares, as ASIO asynchronous operations.
+
+    A resolver has one c-ares channel and drives it from the executor it was
+    given. There is no thread behind it and nothing blocks: c-ares says which
+    sockets it wants watched, the resolver waits for them the way ASIO waits
+    for anything, and c-ares is told when one of them is ready.
+
+    Any number of operations may be pending at a time. c-ares keeps the
+    queries apart, over UDP as well as on the one connection that TCP or TLS
+    take.
+
+    @par Thread safety
+    Distinct objects: safe. Shared objects: unsafe. Where the context runs on
+    more than one thread, make the executor of the resolver a strand and call
+    the resolver from inside that strand.
+
+    @par Cancellation
+    Both operations can be cancelled, by any type of cancellation, and then
+    complete with `boost::asio::error::operation_aborted`. But c-ares has no
+    handle for a single request, so cancelling one operation cancels every
+    operation that is pending on the resolver.
+
+    @par Lifetime
+    Destroying the resolver completes what is pending with
+    `boost::asio::error::operation_aborted` as well. The handlers are not
+    called from the destructor but handed to their executors, so the context
+    has to run once more for them to be.
+
+    @par Example
+    @code
+    boost::asio::awaitable<void> lookup(std::string host)
+    {
+       cares_asio::resolver resolver(co_await boost::asio::this_coro::executor);
+
+       for (const auto& endpoint :
+            co_await resolver.async_resolve(host, "443", boost::asio::use_awaitable))
+          std::cout << endpoint << '\n';
+    }
+    @endcode
+ */
 class CARES_ASIO_EXPORT resolver
 {
 public:
+   /** The type of the executor that a resolver runs on. */
    using executor_type = boost::asio::any_io_executor;
 
+   /** What @ref async_resolve comes back with: the endpoints of the host,
+       best first.
+    */
    using results_type = std::vector<boost::asio::ip::tcp::endpoint>;
+
+   /** The completion signature of @ref async_resolve. */
    using resolve_signature = void(boost::system::error_code, results_type);
+
+   /** A completion handler of @ref async_resolve, whatever its type. */
    using resolve_handler = boost::asio::any_completion_handler<resolve_signature>;
 
+   /** What @ref async_resolve_https comes back with: the records of the
+       host, in no particular order.
+    */
    using https_results_type = std::vector<https_record>;
+
+   /** The completion signature of @ref async_resolve_https. */
    using https_signature = void(boost::system::error_code, https_results_type);
+
+   /** A completion handler of @ref async_resolve_https, whatever its type. */
    using https_handler = boost::asio::any_completion_handler<https_signature>;
 
-   //
-   // With 'tls' enabled every query goes out over DNS over TLS instead of plain UDP/TCP, and the
-   // servers move to port 853 unless set_servers() names a port explicitly.
-   //
+   /** Makes a resolver that runs on `executor`.
+
+       Which servers to ask, which domains to search and the rest of the
+       configuration are those of the system, found the way c-ares finds
+       them: in `/etc/resolv.conf` and what goes with it.
+
+       With `tls.enabled`, every query goes out over DNS over TLS instead of
+       UDP or TCP in the clear, and the servers are asked on port 853.
+
+       @param executor Runs everything the resolver does, and every
+       completion handler that has no executor of its own.
+
+       @param tls Whether to use DNS over TLS, and how.
+
+       @par Exceptions
+       `boost::system::system_error` where c-ares cannot be set up, with its
+       status code as @ref make_ares_error makes it, and `std::runtime_error`
+       where the TLS library cannot.
+    */
    explicit resolver(executor_type executor, const tls_options& tls = {});
+
+   /** Completes every pending operation with
+       `boost::asio::error::operation_aborted` and closes the sockets.
+    */
    ~resolver();
 
    resolver(const resolver&) = delete;
    resolver& operator=(const resolver&) = delete;
 
+   /** Returns the executor that the resolver was made with.
+
+       @return The executor.
+    */
    const executor_type& get_executor() const noexcept { return m_executor; }
 
-   //
-   // Replaces the servers from /etc/resolv.conf, as a comma separated list of addresses with an
-   // optional port ("192.0.2.1", "192.0.2.1:5353", "[::1]:5353"). Does nothing if 'servers' is
-   // empty, and leaves the channel untouched if the list cannot be parsed.
-   //
+   /** Replaces the servers that the resolver asks.
+
+       The list is one that `ares_set_servers_csv()` takes: addresses
+       separated by commas, each with or without a port, as in "192.0.2.1",
+       "192.0.2.1:5353" or "[2001:db8::1]:5353". An address without a port is
+       asked on port 53, or on port 853 over TLS.
+
+       A server has to be given by its address. A resolver that is to ask a
+       server it only has the name of needs that name resolved first, by
+       another resolver.
+
+       @param servers The list. An empty one changes nothing.
+
+       @return An error if the list cannot be made sense of, in which case
+       the resolver keeps the servers it had.
+    */
    boost::system::error_code set_servers(std::string_view servers);
 
-   //
-   // Has 'logger' called with every message from here on, on whichever thread runs the executor.
-   // An empty function turns it off again, which is what a resolver starts out with.
-   //
+   /** Has `logger` called with every message from here on.
+
+       The messages come from inside the operations of the resolver, so
+       `logger` is called on a thread that runs the executor. It should come
+       back quickly, and must not destroy the resolver.
+
+       @param logger Receives the messages. An empty function turns them off
+       again, which is how a resolver starts out.
+    */
    void set_logger(log_function logger);
 
-   //
-   // Resolves 'host' for 'service' (a port number or service name), like ares_getaddrinfo() with
-   // AF_UNSPEC/SOCK_STREAM hints. The completion handler is invoked on this resolver's executor.
-   //
+   /** Resolves a host name to the endpoints of a service.
+
+       Looks up the addresses of `host`, of both families, the way
+       `ares_getaddrinfo()` does for a stream socket: `/etc/hosts` and the
+       search domains are taken into account, and the endpoints come sorted,
+       the one to try first in front. An address in place of the name is
+       taken as it is, without a query.
+
+       @par Completion signature
+       @code
+       void(boost::system::error_code, results_type)
+       @endcode
+
+       @par Errors
+       Any of the c-ares status codes, as @ref make_ares_error makes them --
+       `ARES_ENOTFOUND` for a name that does not exist and `ARES_ETIMEOUT`
+       for servers that do not answer among them -- or
+       `boost::asio::error::operation_aborted`.
+
+       @param host The name to resolve, or an address.
+
+       @param service The port of every endpoint, by its number or by the
+       name it has in `/etc/services`. Empty for port 0, which is also what a
+       name that is not in there comes to -- that is no error.
+
+       @param token The completion token: a callback,
+       `boost::asio::use_awaitable`, `boost::asio::deferred` or any other.
+       The handler is never called from inside this function.
+
+       @return Whatever the completion token makes of the operation.
+    */
    template <boost::asio::completion_token_for<resolve_signature> CompletionToken>
    auto async_resolve(std::string_view host, std::string_view service, CompletionToken&& token)
    {
@@ -135,11 +312,29 @@ public:
          token, std::string(host), std::string(service));
    }
 
-   //
-   // Looks up the HTTPS record (RFC 9460) for 'host', search domains and all, the way
-   // async_resolve() looks up its addresses. A host that has none completes with ARES_ENODATA,
-   // which is the common case rather than a problem.
-   //
+   /** Resolves the HTTPS records (RFC 9460) of a host name.
+
+       Asks for the records of type HTTPS that `host` has, search domains and
+       all, the way @ref async_resolve asks for addresses. It is a question
+       of its own, so the two can be asked at the same time.
+
+       @par Completion signature
+       @code
+       void(boost::system::error_code, https_results_type)
+       @endcode
+
+       @par Errors
+       As for @ref async_resolve. A name that has no such record completes
+       with `ARES_ENODATA`, which is the common case rather than a problem.
+
+       @param host The name to resolve.
+
+       @param token The completion token: a callback,
+       `boost::asio::use_awaitable`, `boost::asio::deferred` or any other.
+       The handler is never called from inside this function.
+
+       @return Whatever the completion token makes of the operation.
+    */
    template <boost::asio::completion_token_for<https_signature> CompletionToken>
    auto async_resolve_https(std::string_view host, CompletionToken&& token)
    {

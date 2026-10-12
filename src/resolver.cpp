@@ -27,7 +27,7 @@ namespace cares_asio
 
 // --------------------------------------------------------------------------------------------------
 
-const boost::system::error_category& ares_category()
+const boost::system::error_category& ares_category() noexcept
 {
    static const struct Category : boost::system::error_category
    {
@@ -38,7 +38,7 @@ const boost::system::error_category& ares_category()
    return category;
 }
 
-boost::system::error_code make_ares_error(int status)
+boost::system::error_code make_ares_error(int status) noexcept
 {
    return {status, ares_category()}; // ARES_SUCCESS is 0, so this stays falsy on success
 }
