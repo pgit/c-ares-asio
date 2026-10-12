@@ -82,6 +82,21 @@
                 "CARES_ASIO_TLS": "OpenSSL",
                 "BUILD_SHARED_LIBS": "ON"
             }
+        },
+        {
+            "name": "gcc",
+            "displayName": "GCC, libstdc++",
+            "description": "GCC and its own standard library. The devcontainer's GoogleTest, Boost.ProgramOptions and spdlog are built for libc++, so GoogleTest is fetched and the 'resolve' example left out",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build-gcc",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_CXX_FLAGS": "-Wall -Wextra",
+                "CARES_ASIO_TLS": "OpenSSL",
+                "FETCHCONTENT_TRY_FIND_PACKAGE_MODE": "NEVER",
+                "CMAKE_DISABLE_FIND_PACKAGE_spdlog": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -100,6 +115,10 @@
         {
             "name": "openssl",
             "configurePreset": "openssl"
+        },
+        {
+            "name": "gcc",
+            "configurePreset": "gcc"
         }
     ],
     "testPresets": [
@@ -128,6 +147,11 @@
         {
             "name": "openssl",
             "configurePreset": "openssl",
+            "inherits": "base"
+        },
+        {
+            "name": "gcc",
+            "configurePreset": "gcc",
             "inherits": "base"
         }
     ]

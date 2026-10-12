@@ -7,6 +7,9 @@ project(
     HOMEPAGE_URL "https://github.com/pgit/c-ares-asio"
     LANGUAGES CXX)
 
+# there are no C++ modules in here, so there is nothing for CMake to scan the sources for
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # --------------------------------------------------------------------------------------------------
 #
 # Options. Tests and examples are the business of whoever works on the library itself, so they
