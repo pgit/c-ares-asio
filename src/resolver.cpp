@@ -1,4 +1,4 @@
-#include "ares_resolver.hpp"
+#include <cares_asio/resolver.hpp>
 
 #include <boost/asio/append.hpp>
 #include <boost/asio/associated_cancellation_slot.hpp>

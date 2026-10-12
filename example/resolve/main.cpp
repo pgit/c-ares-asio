@@ -25,7 +25,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include "ares_resolver.hpp"
+#include <cares_asio/resolver.hpp>
 
 #include <algorithm>
 #include <cctype>

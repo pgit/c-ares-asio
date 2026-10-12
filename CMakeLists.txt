@@ -59,4 +59,11 @@ endif()
 
 # --------------------------------------------------------------------------------------------------
 
-add_subdirectory(src)
+add_library(cares_asio)
+add_library(cares_asio::cares_asio ALIAS cares_asio)
+target_sources(cares_asio PRIVATE "src/resolver.cpp" "src/tls_transport.cpp")
+target_include_directories(cares_asio PUBLIC "include" "src")
+target_link_libraries(cares_asio PUBLIC Boost::headers c-ares::cares tls)
+target_link_libraries(cares_asio PRIVATE spdlog::spdlog_header_only)
+
+add_subdirectory(example/resolve)
