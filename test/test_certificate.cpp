@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 #include "test_certificate.hpp"
 
 #include <openssl/bio.h>

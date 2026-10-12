@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 #include <cares_asio/resolver.hpp>
 
 #include "log.hpp"

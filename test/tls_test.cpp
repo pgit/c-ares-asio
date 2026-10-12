@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // DNS over TLS, against a server that presents a certificate made up for the occasion.
 //

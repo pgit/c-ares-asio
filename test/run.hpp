@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // The tests run their io_context themselves, a handler at a time, so that they can look at what
 // happened in between -- and so that a test that waits for something that never comes fails

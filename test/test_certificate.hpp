@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // A certificate for the TLS side of the fake DNS server, made up on the spot: self-signed, and
 // with that its own trust anchor wherever a test decides to trust it.

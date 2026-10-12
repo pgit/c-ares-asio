@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // What nearly every test starts from: an io_context, a DNS server to ask and a resolver that asks
 // nobody else.

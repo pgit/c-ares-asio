@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // The library does not log anywhere by itself: whatever it has to say goes to the function that
 // resolver::set_logger() was given, and nowhere if there is none.

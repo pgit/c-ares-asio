@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // Resolves the host names given on the command line, or those of the URLs listed in a file, using
 // c-ares driven by the ASIO event loop. With --asio, ASIO's own resolver (a getaddrinfo() call on

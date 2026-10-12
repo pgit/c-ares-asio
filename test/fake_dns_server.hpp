@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // A DNS server on the loopback interface that answers from a table, for a resolver to be pointed
 // at. It speaks UDP, TCP and, once it has a certificate, DNS over TLS -- all on one port, as

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // Uses enough of the library to need its headers, its symbols and those of its dependencies, and
 // nothing that needs a network: an address is resolved without asking anybody.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // with_port() is not part of the interface: it is what resolver::set_servers() runs the list
 // through for DNS over TLS, where nothing listens on the port that c-ares defaults to. The

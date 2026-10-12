@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // The shortest program that resolves a name: the addresses of a host, and then its HTTPS record,
 // each awaited in a coroutine.

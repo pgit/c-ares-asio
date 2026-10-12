@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // HTTPS records (RFC 9460): what comes back for a name, and how the service parameters read once
 // they are out of their wire format.

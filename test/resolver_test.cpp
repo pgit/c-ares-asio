@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // Address lookups, start to finish: the resolver asks the fake server, over real sockets on the
 // loopback interface, and nothing leaves the machine.

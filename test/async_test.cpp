@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // The operations as ASIO asynchronous operations: every kind of completion token, the executor a
 // handler runs on, cancellation, and what becomes of an operation whose resolver goes away.

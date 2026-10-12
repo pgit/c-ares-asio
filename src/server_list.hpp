@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
 //
 // The server lists c-ares takes, as ares_set_servers_csv() describes them: comma separated
 // addresses, each with or without a port ("192.0.2.1", "192.0.2.1:5353", "[2001:db8::1]:5353").

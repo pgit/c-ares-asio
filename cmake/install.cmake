@@ -38,3 +38,8 @@ install(
           "${CMAKE_CURRENT_BINARY_DIR}/cares_asio-config-version.cmake"
     DESTINATION "${CARES_ASIO_INSTALL_CMAKEDIR}"
     COMPONENT cares_asio_development)
+
+install(
+    FILES LICENSE_1_0.txt
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+    COMPONENT cares_asio_runtime)
