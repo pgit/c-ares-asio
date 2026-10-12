@@ -92,6 +92,8 @@ target_sources(
     cares_asio
     PRIVATE src/log.hpp
             src/resolver.cpp
+            src/server_list.cpp
+            src/server_list.hpp
             src/tls_transport.cpp
             src/tls_transport.hpp
     PUBLIC FILE_SET HEADERS
