@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
+//
+// Generated from cmake/version.hpp.in, where project() in CMakeLists.txt has the numbers.
+//
+#pragma once
+
+#define CARES_ASIO_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define CARES_ASIO_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define CARES_ASIO_VERSION_PATCH @PROJECT_VERSION_PATCH@
+
+// "major.minor.patch"
+#define CARES_ASIO_VERSION_STRING "@PROJECT_VERSION@"
+
+// major * 10000 + minor * 100 + patch, for comparing in the preprocessor
+#define CARES_ASIO_VERSION                                                                        \
+   (CARES_ASIO_VERSION_MAJOR * 10000 + CARES_ASIO_VERSION_MINOR * 100 + CARES_ASIO_VERSION_PATCH)

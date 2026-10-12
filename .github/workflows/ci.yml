@@ -1,0 +1,65 @@
+#
+# Builds the library and runs its tests, once for every preset in CMakePresets.json.
+#
+# The jobs run in the image that the devcontainer is built from, so what passes in the
+# devcontainer passes here and the other way round. The tests need no network: they ask a DNS
+# server of their own, see test/fake_dns_server.hpp.
+#
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+
+    container:
+      image: docker.io/psedoc/anyhttp:0.30
+      # root for the checkout to be writable, and the sanitizers need to switch off address
+      # space randomization and to trace their own process
+      options: --user root --cap-add SYS_PTRACE --security-opt seccomp=unconfined
+
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [dev, release, asan, tsan, openssl, gcc]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+
+    container:
+      image: docker.io/psedoc/anyhttp:0.30
+      options: --user root
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the formatting
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git ls-files '*.cpp' '*.hpp' | xargs clang-format --dry-run --Werror

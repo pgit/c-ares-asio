@@ -1,4 +1,11 @@
-#include "ares_resolver.hpp"
+// Copyright (c) 2026 Peter Eisenlohr
+// SPDX-License-Identifier: BSL-1.0
+
+#include <cares_asio/resolver.hpp>
+
+#include "log.hpp"
+#include "server_list.hpp"
+#include "tls_transport.hpp"
 
 #include <boost/asio/append.hpp>
 #include <boost/asio/associated_cancellation_slot.hpp>
@@ -7,12 +14,9 @@
 #include <boost/asio/post.hpp>
 #include <boost/system/system_error.hpp>
 
-#include <spdlog/spdlog.h>
-
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <format>
@@ -21,9 +25,12 @@
 using namespace boost::asio;
 using boost::system::error_code;
 
+namespace cares_asio
+{
+
 // --------------------------------------------------------------------------------------------------
 
-const boost::system::error_category& ares_category()
+const boost::system::error_category& ares_category() noexcept
 {
    static const struct Category : boost::system::error_category
    {
@@ -34,7 +41,7 @@ const boost::system::error_category& ares_category()
    return category;
 }
 
-boost::system::error_code make_ares_error(int status)
+boost::system::error_code make_ares_error(int status) noexcept
 {
    return {status, ares_category()}; // ARES_SUCCESS is 0, so this stays falsy on success
 }
@@ -45,10 +52,13 @@ boost::system::error_code make_ares_error(int status)
 // One socket c-ares has opened. ASIO is only used to wait for readiness on it -- the socket itself
 // belongs to c-ares, which is why the descriptor is released again instead of being closed.
 //
-struct AresResolver::Socket
+struct resolver::socket_watch
 {
-   Socket(const any_io_executor& executor, ares_socket_t fd) : fd(fd), descriptor(executor, fd) {}
-   ~Socket() { detach(); }
+   socket_watch(const any_io_executor& executor, ares_socket_t fd)
+      : fd(fd), descriptor(executor, fd)
+   {
+   }
+   ~socket_watch() { detach(); }
 
    void detach()
    {
@@ -59,13 +69,13 @@ struct AresResolver::Socket
    ares_socket_t fd;
    posix::stream_descriptor descriptor;
 
-   bool wantRead = false; // what c-ares is interested in
-   bool wantWrite = false; //
-   bool waitingRead = false; // what we have handed to ASIO
-   bool waitingWrite = false; //
+   bool want_read = false; // what c-ares is interested in
+   bool want_write = false; //
+   bool waiting_read = false; // what we have handed to ASIO
+   bool waiting_write = false; //
 
    // what the TLS handshake is interested in, which overrides c-ares until there is a session
-   TlsTransport::Interest tlsInterest = TlsTransport::Interest::None;
+   detail::tls_transport::interest tls_interest = detail::tls_transport::interest::none;
 };
 
 // --------------------------------------------------------------------------------------------------
@@ -73,100 +83,32 @@ struct AresResolver::Socket
 namespace
 {
 
-std::string_view trim(std::string_view text)
-{
-   const auto first = text.find_first_not_of(" \t");
-   if (first == std::string_view::npos)
-      return {};
-
-   return text.substr(first, text.find_last_not_of(" \t") - first + 1);
-}
-
-//
-// Whether a c-ares server entry carries an explicit port. "[::1]:853" has it behind the bracket,
-// and "192.0.2.1:853" is the only unbracketed form that can have one -- a bare IPv6 address has
-// several colons and no port at all.
-//
-bool hasPort(std::string_view server)
-{
-   const auto colon = server.rfind(':');
-   if (colon == std::string_view::npos || colon + 1 == server.size())
-      return false;
-
-   const auto bracket = server.rfind(']');
-   if (bracket == std::string_view::npos ? server.find(':') != colon : colon < bracket)
-      return false;
-
-   return std::ranges::all_of(server.substr(colon + 1),
-                              [](char c) { return c >= '0' && c <= '9'; });
-}
-
-//
-// Puts 'port' on every entry of a server list that has none, or on all of them when 'force' is
-// set. Entries in the dns:// URI form are left alone, c-ares knows what to do with those.
-//
-std::string withPort(std::string_view servers, unsigned port, bool force)
-{
-   std::string result;
-
-   for (size_t begin = 0; begin <= servers.size();)
-   {
-      const auto comma = servers.find(',', begin);
-      auto server = trim(servers.substr(begin, comma - begin));
-      begin = comma == std::string_view::npos ? servers.size() + 1 : comma + 1;
-
-      if (server.empty())
-         continue;
-
-      if (!result.empty())
-         result += ',';
-
-      const bool ported = hasPort(server);
-      if (server.contains("://") || (ported && !force))
-      {
-         result += server;
-         continue;
-      }
-
-      if (ported)
-         server = server.substr(0, server.rfind(':'));
-
-      //
-      // A bare IPv6 address only needs its brackets once there is a port behind it.
-      //
-      if (!server.starts_with('[') && server.contains(':'))
-         result += std::format("[{}]:{}", server, port);
-      else
-         result += std::format("{}:{}", server, port);
-   }
-
-   return result;
-}
-
 //
 // A single ares_getaddrinfo() request, kept alive until its callback fires.
 //
-struct Request
+struct resolve_request
 {
    any_io_executor executor;
-   AresResolver::ResolveHandler handler;
+   const log_function& logger;
+   resolver::resolve_handler handler;
 };
 
 //
 // The same, for a single ares_search_dnsrec() request.
 //
-struct HttpsRequest
+struct https_request
 {
    any_io_executor executor;
-   AresResolver::HttpsHandler handler;
+   const log_function& logger;
+   resolver::https_handler handler;
 };
 
 //
 // Renders one SvcParam value. c-ares hands these over as opaque bytes and tells us, through
 // ares_dns_opt_get_datatype(), which of the RFC 9460 wire formats to read them as.
 //
-std::string toText(unsigned short param, ares_dns_opt_datatype_t datatype,
-                   const unsigned char* value, size_t length)
+std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
+                    const unsigned char* value, size_t length)
 {
    switch (datatype)
    {
@@ -266,7 +208,7 @@ std::string toText(unsigned short param, ares_dns_opt_datatype_t datatype,
 //
 // Renders SvcParam 'index' of 'rr' as "key" or "key=value".
 //
-std::string toText(const ares_dns_rr_t* rr, size_t index)
+std::string to_text(const ares_dns_rr_t* rr, size_t index)
 {
    const unsigned char* value = nullptr;
    size_t length = 0;
@@ -279,18 +221,18 @@ std::string toText(const ares_dns_rr_t* rr, size_t index)
    const auto key = name ? std::string(name) : std::format("key{}", param);
 
    const auto text =
-      value ? toText(param, ares_dns_opt_get_datatype(ARES_RR_HTTPS_PARAMS, param), value, length)
+      value ? to_text(param, ares_dns_opt_get_datatype(ARES_RR_HTTPS_PARAMS, param), value, length)
             : std::string();
 
    return text.empty() ? key : std::format("{}={}", key, text);
 }
 
-void httpsCallback(void* arg, ares_status_t status, size_t timeouts,
-                   const ares_dns_record_t* dnsrec)
+void https_callback(void* arg, ares_status_t status, size_t timeouts,
+                    const ares_dns_record_t* dnsrec)
 {
-   std::unique_ptr<HttpsRequest> request(static_cast<HttpsRequest*>(arg));
-   spdlog::debug("ares_search_dnsrec: {} ({} timeout(s))", ares_strerror(static_cast<int>(status)),
-                 timeouts);
+   std::unique_ptr<https_request> request(static_cast<https_request*>(arg));
+   detail::log_debug(request->logger, "ares_search_dnsrec: {} ({} timeout(s))",
+                     ares_strerror(static_cast<int>(status)), timeouts);
 
    const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
                       ? error_code(error::operation_aborted)
@@ -299,7 +241,7 @@ void httpsCallback(void* arg, ares_status_t status, size_t timeouts,
    if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
       slot.clear();
 
-   AresResolver::HttpsResults records;
+   resolver::https_results_type records;
    if (dnsrec && status == ARES_SUCCESS)
    {
       const auto count = ares_dns_record_rr_cnt(dnsrec, ARES_SECTION_ANSWER);
@@ -313,14 +255,14 @@ void httpsCallback(void* arg, ares_status_t status, size_t timeouts,
          if (!rr || ares_dns_rr_get_type(rr) != ARES_REC_TYPE_HTTPS)
             continue;
 
-         HttpsRecord record;
+         https_record record;
          record.priority = ares_dns_rr_get_u16(rr, ARES_RR_HTTPS_PRIORITY);
          if (const auto* target = ares_dns_rr_get_str(rr, ARES_RR_HTTPS_TARGET))
             record.target = target;
 
          const auto params = ares_dns_rr_get_opt_cnt(rr, ARES_RR_HTTPS_PARAMS);
          for (size_t param = 0; param < params; ++param)
-            if (auto text = toText(rr, param); !text.empty())
+            if (auto text = to_text(rr, param); !text.empty())
                record.params.push_back(std::move(text));
 
          records.push_back(std::move(record));
@@ -330,7 +272,7 @@ void httpsCallback(void* arg, ares_status_t status, size_t timeouts,
    post(request->executor, append(std::move(request->handler), ec, std::move(records)));
 }
 
-std::optional<ip::tcp::endpoint> toEndpoint(const ares_addrinfo_node& node)
+std::optional<ip::tcp::endpoint> to_endpoint(const ares_addrinfo_node& node)
 {
    if (node.ai_family == AF_INET && node.ai_addrlen >= sizeof(sockaddr_in))
    {
@@ -355,10 +297,11 @@ std::optional<ip::tcp::endpoint> toEndpoint(const ares_addrinfo_node& node)
    return std::nullopt;
 }
 
-void addrinfoCallback(void* arg, int status, int timeouts, ares_addrinfo* result)
+void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
 {
-   std::unique_ptr<Request> request(static_cast<Request*>(arg));
-   spdlog::debug("ares_getaddrinfo: {} ({} timeout(s))", ares_strerror(status), timeouts);
+   std::unique_ptr<resolve_request> request(static_cast<resolve_request*>(arg));
+   detail::log_debug(request->logger, "ares_getaddrinfo: {} ({} timeout(s))", ares_strerror(status),
+                     timeouts);
 
    //
    // Report the c-ares way of being cancelled as the ASIO one, so that the operation behaves like
@@ -371,11 +314,11 @@ void addrinfoCallback(void* arg, int status, int timeouts, ares_addrinfo* result
    if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
       slot.clear();
 
-   AresResolver::Results endpoints;
+   resolver::results_type endpoints;
    if (result)
    {
       for (const auto* node = result->nodes; node; node = node->ai_next)
-         if (auto endpoint = toEndpoint(*node))
+         if (auto endpoint = to_endpoint(*node))
             endpoints.push_back(*endpoint);
 
       ares_freeaddrinfo(result);
@@ -392,8 +335,8 @@ void addrinfoCallback(void* arg, int status, int timeouts, ares_addrinfo* result
 
 // --------------------------------------------------------------------------------------------------
 
-AresResolver::AresResolver(any_io_executor executor, const TlsOptions& tls)
-   : m_executor(std::move(executor)), m_timer(m_executor)
+resolver::resolver(executor_type executor, const tls_options& tls)
+   : m_executor(std::move(executor)), m_timer(std::make_shared<steady_timer>(m_executor))
 {
    if (int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
       throw boost::system::system_error(make_ares_error(status), "ares_library_init");
@@ -403,7 +346,7 @@ AresResolver::AresResolver(any_io_executor executor, const TlsOptions& tls)
    // us which sockets to watch and for what.
    //
    ares_options options{};
-   options.sock_state_cb = &AresResolver::socketStateCallback;
+   options.sock_state_cb = &resolver::socket_state_callback;
    options.sock_state_cb_data = this;
 
    int optmask = ARES_OPT_SOCK_STATE_CB;
@@ -419,59 +362,66 @@ AresResolver::AresResolver(any_io_executor executor, const TlsOptions& tls)
       optmask |= ARES_OPT_FLAGS;
    }
 
-   if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
-      throw boost::system::system_error(make_ares_error(status), "ares_init_options");
-
-   if (tls.enabled)
+   //
+   // From here on there is something to give back if the rest does not work out, and no
+   // destructor to do it: that one is for objects that were constructed.
+   //
+   try
    {
-      m_tls = std::make_unique<TlsTransport>(tls);
-      m_tls->install(m_channel); // before the channel has had a chance to open anything
+      if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
+         throw boost::system::system_error(make_ares_error(status), "ares_init_options");
+
+      if (tls.enabled)
+      {
+         m_tls = std::make_unique<detail::tls_transport>(tls, m_logger);
+         m_tls->install(m_channel); // before the channel has had a chance to open anything
+
+         //
+         // Nothing listens for DNS over TLS on port 53, which is where the servers that c-ares
+         // found in /etc/resolv.conf are. Port 853 is where the same servers would.
+         //
+         if (auto status = detail::set_port(m_channel, 853); status != ARES_SUCCESS)
+            throw boost::system::system_error(make_ares_error(static_cast<int>(status)),
+                                              "ares_set_servers_csv");
+      }
+   }
+   catch (...)
+   {
+      if (m_channel)
+         ares_destroy(m_channel);
+
+      ares_library_cleanup();
+      throw;
    }
 }
 
-boost::system::error_code AresResolver::setServers(std::string_view servers)
+boost::system::error_code resolver::set_servers(std::string_view servers)
 {
-   std::string list(servers);
-
-   if (m_tls)
-   {
-      //
-      // Nothing listens for DoT on port 53. The servers c-ares read from /etc/resolv.conf come
-      // with :53 already on them and are moved wholesale, while a port spelled out on --server is
-      // taken at face value.
-      //
-      const bool fromResolvConf = list.empty();
-      if (fromResolvConf)
-      {
-         const std::unique_ptr<char, decltype(&ares_free_string)> current(
-            ares_get_servers_csv(m_channel), &ares_free_string);
-         if (!current)
-            return make_ares_error(ARES_ENOMEM);
-
-         list = current.get();
-      }
-
-      list = withPort(list, 853, fromResolvConf);
-   }
-
+   //
+   // For DNS over TLS the port to assume is 853, where the list does not name one. A port that
+   // it does name is taken at face value.
+   //
+   const auto list = m_tls ? detail::with_port(servers, 853, false) : std::string(servers);
    if (list.empty())
       return {};
 
-   spdlog::debug("using DNS server(s) {}", list);
+   detail::log_debug(m_logger, "using DNS server(s) {}", list);
    return make_ares_error(ares_set_servers_csv(m_channel, list.c_str()));
 }
 
-AresResolver::~AresResolver()
+void resolver::set_logger(log_function logger) { m_logger = std::move(logger); }
+
+resolver::~resolver()
 {
    ares_destroy(m_channel); // fails pending queries with ARES_EDESTRUCTION and closes all sockets
    m_sockets.clear();
-   m_timer.cancel();
+   m_timer->cancel();
    ares_library_cleanup();
 }
 
 // --------------------------------------------------------------------------------------------------
 
-void AresResolver::startResolve(std::string host, std::string service, ResolveHandler handler)
+void resolver::start_resolve(std::string host, std::string service, resolve_handler handler)
 {
    //
    // There is no handle for an individual ares_getaddrinfo() request, so cancelling one takes the
@@ -483,27 +433,27 @@ void AresResolver::startResolve(std::string host, std::string service, ResolveHa
          ares_cancel(m_channel);
       });
 
-   auto request = std::make_unique<Request>(m_executor, std::move(handler));
+   auto request = std::make_unique<resolve_request>(m_executor, m_logger, std::move(handler));
 
    ares_addrinfo_hints hints{};
    hints.ai_family = AF_UNSPEC;
    hints.ai_socktype = SOCK_STREAM;
 
-   spdlog::debug("ares_getaddrinfo({}, {})...", host, service);
+   detail::log_debug(m_logger, "ares_getaddrinfo({}, {})...", host, service);
    ares_getaddrinfo(m_channel, host.c_str(), service.empty() ? nullptr : service.c_str(), &hints,
-                    &addrinfoCallback, request.release());
+                    &addrinfo_callback, request.release());
 
-   updateTimeout();
+   update_timeout();
 }
 
-void AresResolver::startHttpsLookup(std::string host, HttpsHandler handler)
+void resolver::start_resolve_https(std::string host, https_handler handler)
 {
    if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
       slot.assign([this](cancellation_type) { //
          ares_cancel(m_channel);
       });
 
-   auto request = std::make_unique<HttpsRequest>(m_executor, std::move(handler));
+   auto request = std::make_unique<https_request>(m_executor, m_logger, std::move(handler));
 
    //
    // ares_search_dnsrec() wants the question as a record rather than as a name, so that it can
@@ -517,18 +467,18 @@ void AresResolver::startHttpsLookup(std::string host, HttpsHandler handler)
 
    if (status == ARES_SUCCESS)
    {
-      spdlog::debug("ares_search_dnsrec({}, HTTPS)...", host);
+      detail::log_debug(m_logger, "ares_search_dnsrec({}, HTTPS)...", host);
 
       //
       // The callback owns the request from here on, and may well have run and freed it before
       // this call returns -- ARES_EFORMERR is the one status that does not reach it.
       //
-      status = ares_search_dnsrec(m_channel, query, &httpsCallback, request.get());
+      status = ares_search_dnsrec(m_channel, query, &https_callback, request.get());
       if (status != ARES_EFORMERR)
       {
          request.release();
          ares_dns_record_destroy(query);
-         updateTimeout();
+         update_timeout();
          return;
       }
    }
@@ -540,20 +490,25 @@ void AresResolver::startHttpsLookup(std::string host, HttpsHandler handler)
    // finish. Both ways of getting here mean a bug or an allocation failure right in this
    // function, not anything the name could have done.
    //
-   spdlog::error("HTTPS query for {}: {}", host, ares_strerror(status));
-   post(m_executor, append(std::move(request->handler), make_ares_error(status), HttpsResults()));
+   detail::log_error(m_logger, "HTTPS query for {}: {}", host, ares_strerror(status));
+   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
+      slot.clear();
+
+   post(m_executor,
+        append(std::move(request->handler), make_ares_error(status), https_results_type()));
 }
 
 // --------------------------------------------------------------------------------------------------
 
-void AresResolver::socketStateCallback(void* data, ares_socket_t fd, int readable, int writable)
+void resolver::socket_state_callback(void* data, ares_socket_t fd, int readable, int writable)
 {
-   static_cast<AresResolver*>(data)->onSocketState(fd, readable != 0, writable != 0);
+   static_cast<resolver*>(data)->on_socket_state(fd, readable != 0, writable != 0);
 }
 
-void AresResolver::onSocketState(ares_socket_t fd, bool readable, bool writable)
+void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
 {
-   spdlog::debug("socket state: fd={} readable={} writable={}", fd, readable, writable);
+   detail::log_debug(m_logger, "socket state: fd={} readable={} writable={}", fd, readable,
+                     writable);
 
    //
    // Neither readable nor writable means c-ares is about to close the socket. The file descriptor
@@ -571,17 +526,24 @@ void AresResolver::onSocketState(ares_socket_t fd, bool readable, bool writable)
 
    auto& socket = m_sockets[fd];
    if (!socket)
-      socket = std::make_shared<Socket>(m_executor, fd);
+      socket = std::make_shared<socket_watch>(m_executor, fd);
 
-   socket->wantRead = readable;
-   socket->wantWrite = writable;
+   socket->want_read = readable;
+   socket->want_write = writable;
    arm(socket);
 }
 
-void AresResolver::arm(const std::shared_ptr<Socket>& socket)
+void resolver::arm(const std::shared_ptr<socket_watch>& socket)
 {
    if (!socket->descriptor.is_open())
       return;
+
+   //
+   // The handlers below find their way back through the socket rather than through 'this'. A
+   // wait that is cancelled may have completed already, with its handler on its way, and by the
+   // time that one runs the socket may be gone -- and the resolver with it, which is where every
+   // socket goes in the end. So a socket that is still there says the resolver is, too.
+   //
 
    //
    // While the handshake is in flight the socket is ours, not c-ares'. Waiting on what c-ares
@@ -589,38 +551,37 @@ void AresResolver::arm(const std::shared_ptr<Socket>& socket)
    // and one that wants to read while c-ares waits for writability spins, because a connected
    // socket is writable almost all of the time.
    //
-   using enum TlsTransport::Interest;
-   const bool handshaking = socket->tlsInterest != None;
-   const bool wantRead = handshaking ? socket->tlsInterest == Read : socket->wantRead;
-   const bool wantWrite = handshaking ? socket->tlsInterest == Write : socket->wantWrite;
+   using interest = detail::tls_transport::interest;
+   const bool handshaking = socket->tls_interest != interest::none;
+   const bool want_read = handshaking ? socket->tls_interest == interest::read : socket->want_read;
+   const bool want_write =
+      handshaking ? socket->tls_interest == interest::write : socket->want_write;
 
-   if (wantRead && !socket->waitingRead)
+   if (want_read && !socket->waiting_read)
    {
-      socket->waitingRead = true;
+      socket->waiting_read = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_read,
                                     [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       onSocketEvent(weak, ARES_FD_EVENT_READ, ec);
+                                       if (const auto socket = weak.lock())
+                                          on_socket_event(socket, ARES_FD_EVENT_READ, ec);
                                     });
    }
 
-   if (wantWrite && !socket->waitingWrite)
+   if (want_write && !socket->waiting_write)
    {
-      socket->waitingWrite = true;
+      socket->waiting_write = true;
       socket->descriptor.async_wait(posix::stream_descriptor::wait_write,
                                     [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       onSocketEvent(weak, ARES_FD_EVENT_WRITE, ec);
+                                       if (const auto socket = weak.lock())
+                                          on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
                                     });
    }
 }
 
-void AresResolver::onSocketEvent(const std::weak_ptr<Socket>& weak, unsigned int event,
-                                 const error_code& ec)
+void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsigned int event,
+                               const error_code& ec)
 {
-   auto socket = weak.lock();
-   if (!socket)
-      return; // socket is gone, and so is c-ares' interest in it
-
-   (event == ARES_FD_EVENT_READ ? socket->waitingRead : socket->waitingWrite) = false;
+   (event == ARES_FD_EVENT_READ ? socket->waiting_read : socket->waiting_write) = false;
 
    if (ec)
       return; // operation_aborted, i.e. the descriptor was detached underneath us
@@ -631,8 +592,8 @@ void AresResolver::onSocketEvent(const std::weak_ptr<Socket>& weak, unsigned int
    //
    if (m_tls)
    {
-      socket->tlsInterest = m_tls->advance(socket->fd, event == ARES_FD_EVENT_WRITE);
-      if (socket->tlsInterest != TlsTransport::Interest::None)
+      socket->tls_interest = m_tls->advance(socket->fd, event == ARES_FD_EVENT_WRITE);
+      if (socket->tls_interest != detail::tls_transport::interest::none)
       {
          arm(socket);
          return;
@@ -651,28 +612,36 @@ void AresResolver::onSocketEvent(const std::weak_ptr<Socket>& weak, unsigned int
    // has to be re-armed here. If the socket was closed during processing, arm() does nothing.
    //
    arm(socket);
-   updateTimeout();
+   update_timeout();
 }
 
 // --------------------------------------------------------------------------------------------------
 
-void AresResolver::updateTimeout()
+void resolver::update_timeout()
 {
    timeval tv{};
    if (ares_timeout(m_channel, nullptr, &tv) == nullptr)
    {
-      m_timer.cancel(); // nothing in flight
+      m_timer->cancel(); // nothing in flight
       return;
    }
 
    using namespace std::chrono;
-   m_timer.expires_after(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
-   m_timer.async_wait([this](const error_code& ec) {
-      if (ec)
-         return; // superseded by a later timeout, or cancelled
+   m_timer->expires_after(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
 
-      spdlog::debug("query timeout");
+   //
+   // Cancelling the timer does nothing for a wait that has completed already and only has its
+   // handler left to run, and the resolver may be gone before that happens. The timer goes with
+   // it, which is what the handler looks at before anything else.
+   //
+   m_timer->async_wait([this, weak = std::weak_ptr(m_timer)](const error_code& ec) {
+      if (ec || weak.expired())
+         return; // superseded by a later timeout, cancelled, or left behind by the resolver
+
+      detail::log_debug(m_logger, "query timeout");
       ares_process_fds(m_channel, nullptr, 0, ARES_PROCESS_FLAG_NONE);
-      updateTimeout();
+      update_timeout();
    });
 }
+
+} // namespace cares_asio
