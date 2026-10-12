@@ -359,41 +359,46 @@ resolver::resolver(executor_type executor, const tls_options& tls)
       optmask |= ARES_OPT_FLAGS;
    }
 
-   if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
-      throw boost::system::system_error(make_ares_error(status), "ares_init_options");
-
-   if (tls.enabled)
+   //
+   // From here on there is something to give back if the rest does not work out, and no
+   // destructor to do it: that one is for objects that were constructed.
+   //
+   try
    {
-      m_tls = std::make_unique<detail::tls_transport>(tls, m_logger);
-      m_tls->install(m_channel); // before the channel has had a chance to open anything
+      if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
+         throw boost::system::system_error(make_ares_error(status), "ares_init_options");
+
+      if (tls.enabled)
+      {
+         m_tls = std::make_unique<detail::tls_transport>(tls, m_logger);
+         m_tls->install(m_channel); // before the channel has had a chance to open anything
+
+         //
+         // Nothing listens for DNS over TLS on port 53, which is where the servers that c-ares
+         // found in /etc/resolv.conf are. Port 853 is where the same servers would.
+         //
+         if (auto status = detail::set_port(m_channel, 853); status != ARES_SUCCESS)
+            throw boost::system::system_error(make_ares_error(static_cast<int>(status)),
+                                              "ares_set_servers_csv");
+      }
+   }
+   catch (...)
+   {
+      if (m_channel)
+         ares_destroy(m_channel);
+
+      ares_library_cleanup();
+      throw;
    }
 }
 
 boost::system::error_code resolver::set_servers(std::string_view servers)
 {
-   std::string list(servers);
-
-   if (m_tls)
-   {
-      //
-      // Nothing listens for DoT on port 53. The servers c-ares read from /etc/resolv.conf come
-      // with :53 already on them and are moved wholesale, while a port spelled out on --server is
-      // taken at face value.
-      //
-      const bool from_resolv_conf = list.empty();
-      if (from_resolv_conf)
-      {
-         const std::unique_ptr<char, decltype(&ares_free_string)> current(
-            ares_get_servers_csv(m_channel), &ares_free_string);
-         if (!current)
-            return make_ares_error(ARES_ENOMEM);
-
-         list = current.get();
-      }
-
-      list = detail::with_port(list, 853, from_resolv_conf);
-   }
-
+   //
+   // For DNS over TLS the port to assume is 853, where the list does not name one. A port that
+   // it does name is taken at face value.
+   //
+   const auto list = m_tls ? detail::with_port(servers, 853, false) : std::string(servers);
    if (list.empty())
       return {};
 

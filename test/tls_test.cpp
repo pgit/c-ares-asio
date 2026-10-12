@@ -181,6 +181,21 @@ TEST_F(DnsOverTls, VerifiesTheChainWhereThereIsNoNameToCheck)
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
 }
 
+TEST_F(DnsOverTls, KeepsItsServersWhenGivenNone)
+{
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+
+   //
+   // That is all an empty list is to do. In particular it is not to send the server that was
+   // set, with a port of its own, off to the one that DNS over TLS has by default.
+   //
+   EXPECT_FALSE(resolver->set_servers(""));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+}
+
 TEST_F(DnsOverTls, KeepsTheConnectionForTheNextQuestion)
 {
    make_resolver({.enabled = true, .hostname = {}, .verify = false});

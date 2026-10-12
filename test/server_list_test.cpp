@@ -7,6 +7,10 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <string>
+
+using cares_asio::detail::set_port;
 using cares_asio::detail::with_port;
 
 TEST(ServerList, AddsThePortWhereThereIsNone)
@@ -63,4 +67,37 @@ TEST(ServerList, LeavesUrisAlone)
    EXPECT_EQ(with_port("dns://192.0.2.1", 853, true), "dns://192.0.2.1");
    EXPECT_EQ(with_port("dns://192.0.2.1:53,192.0.2.2", 853, false),
              "dns://192.0.2.1:53,192.0.2.2:853");
+}
+
+// --------------------------------------------------------------------------------------------------
+
+namespace
+{
+
+std::string servers_of(ares_channel_t* channel)
+{
+   const std::unique_ptr<char, decltype(&ares_free_string)> csv(ares_get_servers_csv(channel),
+                                                                &ares_free_string);
+   return csv ? csv.get() : "";
+}
+
+} // namespace
+
+TEST(ServerList, MovesTheServersOfAChannelToAnotherPort)
+{
+   //
+   // What a resolver does to the servers from /etc/resolv.conf when it is made for DNS over
+   // TLS -- with a channel of the test's own here, so that it is the test that says which
+   // servers there are to move.
+   //
+   ares_channel_t* created = nullptr;
+   ASSERT_EQ(ares_init_options(&created, nullptr, 0), ARES_SUCCESS);
+   const std::unique_ptr<ares_channel_t, decltype(&ares_destroy)> channel(created, &ares_destroy);
+
+   ASSERT_EQ(ares_set_servers_csv(channel.get(), "192.0.2.1,192.0.2.2:5353,[2001:db8::1]:53"),
+             ARES_SUCCESS);
+   ASSERT_EQ(servers_of(channel.get()), "192.0.2.1:53,192.0.2.2:5353,[2001:db8::1]:53");
+
+   EXPECT_EQ(set_port(channel.get(), 853), ARES_SUCCESS);
+   EXPECT_EQ(servers_of(channel.get()), "192.0.2.1:853,192.0.2.2:853,[2001:db8::1]:853");
 }

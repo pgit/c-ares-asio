@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <format>
+#include <memory>
 
 namespace cares_asio::detail
 {
@@ -77,6 +78,20 @@ std::string with_port(std::string_view servers, unsigned port, bool force)
    }
 
    return result;
+}
+
+ares_status_t set_port(ares_channel_t* channel, unsigned port)
+{
+   const std::unique_ptr<char, decltype(&ares_free_string)> current(ares_get_servers_csv(channel),
+                                                                    &ares_free_string);
+   if (!current)
+      return ARES_ENOMEM;
+
+   const auto moved = with_port(current.get(), port, true);
+   if (moved.empty())
+      return ARES_SUCCESS; // no servers, so none to move
+
+   return static_cast<ares_status_t>(ares_set_servers_csv(channel, moved.c_str()));
 }
 
 } // namespace cares_asio::detail
