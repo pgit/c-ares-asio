@@ -22,13 +22,16 @@
 #include <limits>
 #include <stdexcept>
 
+namespace cares_asio::detail
+{
+
 namespace
 {
 
 //
 // Drains OpenSSL's error queue into something printable.
 //
-std::string sslError()
+std::string ssl_error()
 {
    std::string message;
    while (const auto code = ERR_get_error())
@@ -48,7 +51,7 @@ std::string sslError()
 // known even for groups without an EVP_PKEY, like the post-quantum hybrids, which is also why
 // there may be no bit count to go with it.
 //
-std::string keyExchange(SSL* ssl)
+std::string key_exchange(SSL* ssl)
 {
 #if defined(OPENSSL_IS_AWSLC) || defined(OPENSSL_IS_BORINGSSL)
    const char* group = SSL_get_group_name(SSL_get_group_id(ssl));
@@ -69,7 +72,7 @@ std::string keyExchange(SSL* ssl)
 //
 // A distinguished name in RFC 2253 form, e.g. "CN=dns.google".
 //
-std::string distinguishedName(const X509_NAME* name)
+std::string distinguished_name(const X509_NAME* name)
 {
    if (!name)
       return "none";
@@ -93,16 +96,16 @@ std::string distinguishedName(const X509_NAME* name)
 //
 // What was negotiated.
 //
-std::string handshakeInfo(SSL* ssl)
+std::string handshake_info(SSL* ssl)
 {
    return std::format("{}, cipher={}, group={}{}", SSL_get_version(ssl), SSL_get_cipher_name(ssl),
-                      keyExchange(ssl), SSL_session_reused(ssl) ? ", resumed" : "");
+                      key_exchange(ssl), SSL_session_reused(ssl) ? ", resumed" : "");
 }
 
 //
 // Who we negotiated it with.
 //
-std::string peerInfo(SSL* ssl)
+std::string peer_info(SSL* ssl)
 {
    const X509* peer = SSL_get0_peer_certificate(ssl);
    if (!peer)
@@ -114,8 +117,8 @@ std::string peerInfo(SSL* ssl)
    const bool verified =
       SSL_get_verify_mode(ssl) != SSL_VERIFY_NONE && SSL_get_verify_result(ssl) == X509_V_OK;
 
-   return std::format("subject={}, issuer={}, {}", distinguishedName(X509_get_subject_name(peer)),
-                      distinguishedName(X509_get_issuer_name(peer)),
+   return std::format("subject={}, issuer={}, {}", distinguished_name(X509_get_subject_name(peer)),
+                      distinguished_name(X509_get_issuer_name(peer)),
                       verified ? "verified" : "NOT verified");
 }
 
@@ -126,33 +129,33 @@ std::string peerInfo(SSL* ssl)
 //
 // One TCP connection c-ares has opened, and the TLS session riding on it.
 //
-struct TlsTransport::Session
+struct tls_transport::tls_session
 {
-   enum class State
+   enum class phase
    {
-      Connecting, // TCP connect in flight
-      Handshaking, // TLS handshake in flight
-      Established, // c-ares may read and write
-      Failed //
+      connecting, // TCP connect in flight
+      handshaking, // TLS handshake in flight
+      established, // c-ares may read and write
+      failed //
    };
 
-   ~Session()
+   ~tls_session()
    {
       if (ssl)
          SSL_free(ssl);
    }
 
-   State state = State::Connecting;
+   phase state = phase::connecting;
    SSL* ssl = nullptr;
 };
 
 // --------------------------------------------------------------------------------------------------
 
-TlsTransport::TlsTransport(TlsOptions options) : m_options(std::move(options))
+tls_transport::tls_transport(tls_options options) : m_options(std::move(options))
 {
    m_context = SSL_CTX_new(TLS_client_method());
    if (!m_context)
-      throw std::runtime_error("SSL_CTX_new: " + sslError());
+      throw std::runtime_error("SSL_CTX_new: " + ssl_error());
 
    SSL_CTX_set_min_proto_version(m_context, TLS1_2_VERSION);
 
@@ -167,7 +170,7 @@ TlsTransport::TlsTransport(TlsOptions options) : m_options(std::move(options))
       if (SSL_CTX_set_default_verify_paths(m_context) != 1)
       {
          SSL_CTX_free(m_context);
-         throw std::runtime_error("SSL_CTX_set_default_verify_paths: " + sslError());
+         throw std::runtime_error("SSL_CTX_set_default_verify_paths: " + ssl_error());
       }
       SSL_CTX_set_verify(m_context, SSL_VERIFY_PEER, nullptr);
    }
@@ -177,14 +180,14 @@ TlsTransport::TlsTransport(TlsOptions options) : m_options(std::move(options))
    }
 }
 
-TlsTransport::~TlsTransport()
+tls_transport::~tls_transport()
 {
    m_sessions.clear(); // frees the SSL objects while the context is still around
    if (m_context)
       SSL_CTX_free(m_context);
 }
 
-void TlsTransport::install(ares_channel_t* channel)
+void tls_transport::install(ares_channel_t* channel)
 {
    if (const auto status = ares_set_socket_functions_ex(channel, &functions(), this);
        status != ARES_SUCCESS)
@@ -192,7 +195,7 @@ void TlsTransport::install(ares_channel_t* channel)
                                ares_strerror(static_cast<int>(status)));
 }
 
-TlsTransport::Session* TlsTransport::find(ares_socket_t fd)
+tls_transport::tls_session* tls_transport::find(ares_socket_t fd)
 {
    const auto it = m_sessions.find(fd);
    return it == m_sessions.end() ? nullptr : it->second.get();
@@ -200,55 +203,55 @@ TlsTransport::Session* TlsTransport::find(ares_socket_t fd)
 
 // --------------------------------------------------------------------------------------------------
 
-TlsTransport::Interest TlsTransport::advance(ares_socket_t fd, bool writable)
+tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
 {
    auto* session = find(fd);
    if (!session)
-      return Interest::None; // not one of ours, e.g. a UDP socket
+      return interest::none; // not one of ours, e.g. a UDP socket
 
-   if (session->state == Session::State::Connecting)
+   if (session->state == tls_session::phase::connecting)
    {
       if (!writable)
-         return Interest::Write; // the connect is what we are still waiting for
+         return interest::write; // the connect is what we are still waiting for
 
       int error = 0;
       socklen_t length = sizeof(error);
       if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0)
       {
          spdlog::debug("fd={} connect failed: {}", fd, std::strerror(error ? error : errno));
-         session->state = Session::State::Failed;
-         return Interest::None; // let c-ares pick the failure up through recv/send
+         session->state = tls_session::phase::failed;
+         return interest::none; // let c-ares pick the failure up through recv/send
       }
 
-      if (!startHandshake(*session, fd))
+      if (!start_handshake(*session, fd))
       {
-         session->state = Session::State::Failed;
-         return Interest::None;
+         session->state = tls_session::phase::failed;
+         return interest::none;
       }
 
-      session->state = Session::State::Handshaking;
+      session->state = tls_session::phase::handshaking;
    }
 
-   if (session->state != Session::State::Handshaking)
-      return Interest::None;
+   if (session->state != tls_session::phase::handshaking)
+      return interest::none;
 
    ERR_clear_error();
    const int result = SSL_connect(session->ssl);
    if (result == 1)
    {
-      session->state = Session::State::Established;
-      spdlog::info("fd={} TLS established: {}", fd, handshakeInfo(session->ssl));
-      spdlog::info("fd={} TLS peer: {}", fd, peerInfo(session->ssl));
-      return Interest::None;
+      session->state = tls_session::phase::established;
+      spdlog::info("fd={} TLS established: {}", fd, handshake_info(session->ssl));
+      spdlog::info("fd={} TLS peer: {}", fd, peer_info(session->ssl));
+      return interest::none;
    }
 
    switch (SSL_get_error(session->ssl, result))
    {
    case SSL_ERROR_WANT_READ:
-      return Interest::Read;
+      return interest::read;
 
    case SSL_ERROR_WANT_WRITE:
-      return Interest::Write;
+      return interest::write;
 
    default:
       //
@@ -258,26 +261,26 @@ TlsTransport::Interest TlsTransport::advance(ares_socket_t fd, bool writable)
       if (const auto result = SSL_get_verify_result(session->ssl); result != X509_V_OK)
          spdlog::error("TLS handshake failed: {}", X509_verify_cert_error_string(result));
       else
-         spdlog::error("TLS handshake failed: {}", sslError());
+         spdlog::error("TLS handshake failed: {}", ssl_error());
 
-      session->state = Session::State::Failed;
-      return Interest::None;
+      session->state = tls_session::phase::failed;
+      return interest::none;
    }
 }
 
-bool TlsTransport::startHandshake(Session& session, ares_socket_t fd)
+bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
 {
    session.ssl = SSL_new(m_context);
    if (!session.ssl)
    {
-      spdlog::error("SSL_new: {}", sslError());
+      spdlog::error("SSL_new: {}", ssl_error());
       return false;
    }
 
    SSL_set_connect_state(session.ssl);
    if (SSL_set_fd(session.ssl, fd) != 1)
    {
-      spdlog::error("SSL_set_fd: {}", sslError());
+      spdlog::error("SSL_set_fd: {}", ssl_error());
       return false;
    }
 
@@ -294,7 +297,7 @@ bool TlsTransport::startHandshake(Session& session, ares_socket_t fd)
          SSL_set_hostflags(session.ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
          if (SSL_set1_host(session.ssl, m_options.hostname.c_str()) != 1)
          {
-            spdlog::error("SSL_set1_host({}): {}", m_options.hostname, sslError());
+            spdlog::error("SSL_set1_host({}): {}", m_options.hostname, ssl_error());
             return false;
          }
       }
@@ -305,7 +308,7 @@ bool TlsTransport::startHandshake(Session& session, ares_socket_t fd)
 
 // --------------------------------------------------------------------------------------------------
 
-ares_socket_t TlsTransport::onSocket(int domain, int type, int protocol)
+ares_socket_t tls_transport::on_socket(int domain, int type, int protocol)
 {
    const int fd = ::socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
    if (fd < 0)
@@ -319,22 +322,23 @@ ares_socket_t TlsTransport::onSocket(int domain, int type, int protocol)
    {
       const int on = 1;
       ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
-      m_sessions.emplace(fd, std::make_unique<Session>());
+      m_sessions.emplace(fd, std::make_unique<tls_session>());
    }
 
    return fd;
 }
 
-int TlsTransport::onClose(ares_socket_t fd)
+int tls_transport::on_close(ares_socket_t fd)
 {
-   if (auto* session = find(fd); session && session->state == Session::State::Established)
+   if (auto* session = find(fd); session && session->state == tls_session::phase::established)
       SSL_shutdown(session->ssl); // best effort close_notify, the answer is already in
 
    m_sessions.erase(fd);
    return ::close(fd);
 }
 
-int TlsTransport::onConnect(ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length)
+int tls_transport::on_connect(ares_socket_t fd, const struct sockaddr* address,
+                              ares_socklen_t length)
 {
    if (::connect(fd, address, length) == 0)
       return 0;
@@ -342,7 +346,7 @@ int TlsTransport::onConnect(ares_socket_t fd, const struct sockaddr* address, ar
    return -1; // errno is set, and for a non-blocking socket it is almost always EINPROGRESS
 }
 
-ares_ssize_t TlsTransport::onRecv(ares_socket_t fd, void* buffer, size_t length)
+ares_ssize_t tls_transport::on_recv(ares_socket_t fd, void* buffer, size_t length)
 {
    auto* session = find(fd);
    if (!session)
@@ -350,16 +354,16 @@ ares_ssize_t TlsTransport::onRecv(ares_socket_t fd, void* buffer, size_t length)
 
    switch (session->state)
    {
-   case Session::State::Connecting:
-   case Session::State::Handshaking:
+   case tls_session::phase::connecting:
+   case tls_session::phase::handshaking:
       errno = EAGAIN; // advance() is still working on it
       return -1;
 
-   case Session::State::Failed:
+   case tls_session::phase::failed:
       errno = ECONNRESET;
       return -1;
 
-   case Session::State::Established:
+   case tls_session::phase::established:
       break;
    }
 
@@ -382,14 +386,14 @@ ares_ssize_t TlsTransport::onRecv(ares_socket_t fd, void* buffer, size_t length)
       return 0; // clean shutdown, which is end of file as far as c-ares is concerned
 
    default:
-      spdlog::debug("fd={} SSL_read: {}", fd, sslError());
-      session->state = Session::State::Failed;
+      spdlog::debug("fd={} SSL_read: {}", fd, ssl_error());
+      session->state = tls_session::phase::failed;
       errno = ECONNRESET;
       return -1;
    }
 }
 
-ares_ssize_t TlsTransport::onSend(ares_socket_t fd, const void* buffer, size_t length, int flags)
+ares_ssize_t tls_transport::on_send(ares_socket_t fd, const void* buffer, size_t length, int flags)
 {
    auto* session = find(fd);
    if (!session)
@@ -397,16 +401,16 @@ ares_ssize_t TlsTransport::onSend(ares_socket_t fd, const void* buffer, size_t l
 
    switch (session->state)
    {
-   case Session::State::Connecting:
-   case Session::State::Handshaking:
+   case tls_session::phase::connecting:
+   case tls_session::phase::handshaking:
       errno = EAGAIN;
       return -1;
 
-   case Session::State::Failed:
+   case tls_session::phase::failed:
       errno = ECONNRESET;
       return -1;
 
-   case Session::State::Established:
+   case tls_session::phase::established:
       break;
    }
 
@@ -426,8 +430,8 @@ ares_ssize_t TlsTransport::onSend(ares_socket_t fd, const void* buffer, size_t l
       return -1;
 
    default:
-      spdlog::debug("fd={} SSL_write: {}", fd, sslError());
-      session->state = Session::State::Failed;
+      spdlog::debug("fd={} SSL_write: {}", fd, ssl_error());
+      session->state = tls_session::phase::failed;
       errno = ECONNRESET;
       return -1;
    }
@@ -439,18 +443,18 @@ ares_ssize_t TlsTransport::onSend(ares_socket_t fd, const void* buffer, size_t l
 // The C side of it. Everything c-ares needs but we have no reason to intercept is forwarded to the
 // system call it would have made itself.
 //
-const struct ares_socket_functions_ex& TlsTransport::functions()
+const struct ares_socket_functions_ex& tls_transport::functions()
 {
    static const struct ares_socket_functions_ex table{
       .version = 1,
       .flags = ARES_SOCKFUNC_FLAG_NONBLOCKING,
 
       .asocket = [](int domain, int type, int protocol, void* data) -> ares_socket_t {
-         return static_cast<TlsTransport*>(data)->onSocket(domain, type, protocol);
+         return static_cast<tls_transport*>(data)->on_socket(domain, type, protocol);
       },
 
       .aclose = [](ares_socket_t fd, void* data) -> int {
-         return static_cast<TlsTransport*>(data)->onClose(fd);
+         return static_cast<tls_transport*>(data)->on_close(fd);
       },
 
       .asetsockopt = [](ares_socket_t fd, ares_socket_opt_t opt, const void* value,
@@ -481,7 +485,7 @@ const struct ares_socket_functions_ex& TlsTransport::functions()
 
       .aconnect = [](ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length,
                      unsigned int, void* data) -> int {
-         return static_cast<TlsTransport*>(data)->onConnect(fd, address, length);
+         return static_cast<tls_transport*>(data)->on_connect(fd, address, length);
       },
 
       .arecvfrom = [](ares_socket_t fd, void* buffer, size_t length, int, struct sockaddr* address,
@@ -491,12 +495,12 @@ const struct ares_socket_functions_ex& TlsTransport::functions()
          //
          if (address && address_len)
             *address_len = 0;
-         return static_cast<TlsTransport*>(data)->onRecv(fd, buffer, length);
+         return static_cast<tls_transport*>(data)->on_recv(fd, buffer, length);
       },
 
       .asendto = [](ares_socket_t fd, const void* buffer, size_t length, int flags,
                     const struct sockaddr*, ares_socklen_t, void* data) -> ares_ssize_t {
-         return static_cast<TlsTransport*>(data)->onSend(fd, buffer, length, flags);
+         return static_cast<tls_transport*>(data)->on_send(fd, buffer, length, flags);
       },
 
       .agetsockname = [](ares_socket_t fd, struct sockaddr* address, ares_socklen_t* length,
@@ -522,3 +526,5 @@ const struct ares_socket_functions_ex& TlsTransport::functions()
 
    return table;
 }
+
+} // namespace cares_asio::detail

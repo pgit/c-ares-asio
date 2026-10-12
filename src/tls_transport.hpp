@@ -12,42 +12,37 @@
 //
 #pragma once
 
+#include <cares_asio/resolver.hpp>
+
 #include <ares.h>
 
 #include <openssl/ssl.h>
 
 #include <map>
 #include <memory>
-#include <string>
 
-struct TlsOptions
+namespace cares_asio::detail
 {
-   bool enabled = false;
-   std::string hostname; // for SNI and certificate verification, empty if none was given
-   bool verify = true;
-};
 
-// --------------------------------------------------------------------------------------------------
-
-class TlsTransport
+class tls_transport
 {
 public:
    //
-   // What the socket is waiting for. 'None' means the TLS session is settled, one way or the
+   // What the socket is waiting for. 'none' means the TLS session is settled, one way or the
    // other, and readiness on the socket is c-ares' business again.
    //
-   enum class Interest
+   enum class interest
    {
-      None,
-      Read,
-      Write
+      none,
+      read,
+      write
    };
 
-   explicit TlsTransport(TlsOptions options);
-   ~TlsTransport();
+   explicit tls_transport(tls_options options);
+   ~tls_transport();
 
-   TlsTransport(const TlsTransport&) = delete;
-   TlsTransport& operator=(const TlsTransport&) = delete;
+   tls_transport(const tls_transport&) = delete;
+   tls_transport& operator=(const tls_transport&) = delete;
 
    //
    // Hands our socket functions to the channel, which must not have opened any sockets yet.
@@ -63,26 +58,28 @@ public:
    // wants to read would just spin. So the event loop calls this first and only lets c-ares see the socket
    // once there is a TLS session on it.
    //
-   Interest advance(ares_socket_t fd, bool writable);
+   interest advance(ares_socket_t fd, bool writable);
 
 private:
-   struct Session;
+   struct tls_session;
 
-   Session* find(ares_socket_t fd);
-   bool startHandshake(Session& session, ares_socket_t fd);
+   tls_session* find(ares_socket_t fd);
+   bool start_handshake(tls_session& session, ares_socket_t fd);
 
    //
    // The socket functions themselves. c-ares calls the static thunks, which forward here.
    //
-   ares_socket_t onSocket(int domain, int type, int protocol);
-   int onClose(ares_socket_t fd);
-   int onConnect(ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length);
-   ares_ssize_t onRecv(ares_socket_t fd, void* buffer, size_t length);
-   ares_ssize_t onSend(ares_socket_t fd, const void* buffer, size_t length, int flags);
+   ares_socket_t on_socket(int domain, int type, int protocol);
+   int on_close(ares_socket_t fd);
+   int on_connect(ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length);
+   ares_ssize_t on_recv(ares_socket_t fd, void* buffer, size_t length);
+   ares_ssize_t on_send(ares_socket_t fd, const void* buffer, size_t length, int flags);
 
    static const struct ares_socket_functions_ex& functions();
 
-   TlsOptions m_options;
+   tls_options m_options;
    SSL_CTX* m_context = nullptr;
-   std::map<ares_socket_t, std::unique_ptr<Session>> m_sessions;
+   std::map<ares_socket_t, std::unique_ptr<tls_session>> m_sessions;
 };
+
+} // namespace cares_asio::detail

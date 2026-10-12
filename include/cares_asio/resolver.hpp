@@ -9,14 +9,14 @@
 //
 #pragma once
 
+#include <cares_asio/error.hpp>
+
 #include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/error_code.hpp>
-
-#include "tls_transport.hpp"
 
 #include <ares.h>
 
@@ -26,11 +26,13 @@
 #include <string_view>
 #include <vector>
 
-//
-// Error category wrapping the ARES_* status codes, so that they can travel as an error_code.
-//
-const boost::system::error_category& ares_category();
-boost::system::error_code make_ares_error(int status);
+namespace cares_asio
+{
+
+namespace detail
+{
+class tls_transport;
+}
 
 // --------------------------------------------------------------------------------------------------
 
@@ -39,7 +41,7 @@ boost::system::error_code make_ares_error(int status);
 // the host to continue at; anything else is the service form, where 'params' describes how to
 // reach the endpoint.
 //
-struct HttpsRecord
+struct https_record
 {
    unsigned short priority = 0;
    std::string target; // empty, or ".", for the record's own name
@@ -52,46 +54,60 @@ struct HttpsRecord
    std::vector<std::string> params;
 };
 
+//
+// DNS over TLS (RFC 7858), which is off unless 'enabled' says otherwise.
+//
+struct tls_options
+{
+   bool enabled = false;
+   std::string hostname; // for SNI and certificate verification, empty if none was given
+   bool verify = true;
+};
+
 // --------------------------------------------------------------------------------------------------
 
-class AresResolver
+class resolver
 {
 public:
-   using Results = std::vector<boost::asio::ip::tcp::endpoint>;
-   using Signature = void(boost::system::error_code, Results);
-   using ResolveHandler = boost::asio::any_completion_handler<Signature>;
+   using executor_type = boost::asio::any_io_executor;
 
-   using HttpsResults = std::vector<HttpsRecord>;
-   using HttpsSignature = void(boost::system::error_code, HttpsResults);
-   using HttpsHandler = boost::asio::any_completion_handler<HttpsSignature>;
+   using results_type = std::vector<boost::asio::ip::tcp::endpoint>;
+   using resolve_signature = void(boost::system::error_code, results_type);
+   using resolve_handler = boost::asio::any_completion_handler<resolve_signature>;
+
+   using https_results_type = std::vector<https_record>;
+   using https_signature = void(boost::system::error_code, https_results_type);
+   using https_handler = boost::asio::any_completion_handler<https_signature>;
 
    //
    // With 'tls' enabled every query goes out over DNS over TLS instead of plain UDP/TCP, and the
-   // servers move to port 853 unless --server named a port explicitly.
+   // servers move to port 853 unless set_servers() names a port explicitly.
    //
-   explicit AresResolver(boost::asio::any_io_executor executor, const TlsOptions& tls = {});
-   ~AresResolver();
+   explicit resolver(executor_type executor, const tls_options& tls = {});
+   ~resolver();
+
+   resolver(const resolver&) = delete;
+   resolver& operator=(const resolver&) = delete;
+
+   const executor_type& get_executor() const noexcept { return m_executor; }
 
    //
    // Replaces the servers from /etc/resolv.conf, as a comma separated list of addresses with an
    // optional port ("192.0.2.1", "192.0.2.1:5353", "[::1]:5353"). Does nothing if 'servers' is
    // empty, and leaves the channel untouched if the list cannot be parsed.
    //
-   boost::system::error_code setServers(std::string_view servers);
-
-   AresResolver(const AresResolver&) = delete;
-   AresResolver& operator=(const AresResolver&) = delete;
+   boost::system::error_code set_servers(std::string_view servers);
 
    //
    // Resolves 'host' for 'service' (a port number or service name), like ares_getaddrinfo() with
    // AF_UNSPEC/SOCK_STREAM hints. The completion handler is invoked on this resolver's executor.
    //
-   template <typename CompletionToken>
+   template <boost::asio::completion_token_for<resolve_signature> CompletionToken>
    auto async_resolve(std::string_view host, std::string_view service, CompletionToken&& token)
    {
-      return boost::asio::async_initiate<CompletionToken, Signature>(
-         [this](ResolveHandler handler, std::string host, std::string service) {
-            startResolve(std::move(host), std::move(service), std::move(handler));
+      return boost::asio::async_initiate<CompletionToken, resolve_signature>(
+         [this](resolve_handler handler, std::string host, std::string service) {
+            start_resolve(std::move(host), std::move(service), std::move(handler));
          },
          token, std::string(host), std::string(service));
    }
@@ -101,34 +117,36 @@ public:
    // async_resolve() looks up its addresses. A host that has none completes with ARES_ENODATA,
    // which is the common case rather than a problem.
    //
-   template <typename CompletionToken>
-   auto async_lookupHttps(std::string_view host, CompletionToken&& token)
+   template <boost::asio::completion_token_for<https_signature> CompletionToken>
+   auto async_resolve_https(std::string_view host, CompletionToken&& token)
    {
-      return boost::asio::async_initiate<CompletionToken, HttpsSignature>(
-         [this](HttpsHandler handler, std::string host) {
-            startHttpsLookup(std::move(host), std::move(handler));
+      return boost::asio::async_initiate<CompletionToken, https_signature>(
+         [this](https_handler handler, std::string host) {
+            start_resolve_https(std::move(host), std::move(handler));
          },
          token, std::string(host));
    }
 
 private:
-   struct Socket;
+   struct socket_watch;
 
-   void startResolve(std::string host, std::string service, ResolveHandler handler);
-   void startHttpsLookup(std::string host, HttpsHandler handler);
+   void start_resolve(std::string host, std::string service, resolve_handler handler);
+   void start_resolve_https(std::string host, https_handler handler);
 
-   static void socketStateCallback(void* data, ares_socket_t fd, int readable, int writable);
-   void onSocketState(ares_socket_t fd, bool readable, bool writable);
+   static void socket_state_callback(void* data, ares_socket_t fd, int readable, int writable);
+   void on_socket_state(ares_socket_t fd, bool readable, bool writable);
 
-   void arm(const std::shared_ptr<Socket>& socket);
-   void onSocketEvent(const std::weak_ptr<Socket>& weak, unsigned int event,
-                      const boost::system::error_code& ec);
+   void arm(const std::shared_ptr<socket_watch>& socket);
+   void on_socket_event(const std::weak_ptr<socket_watch>& weak, unsigned int event,
+                        const boost::system::error_code& ec);
 
-   void updateTimeout();
+   void update_timeout();
 
-   boost::asio::any_io_executor m_executor;
+   executor_type m_executor;
    boost::asio::steady_timer m_timer;
    ares_channel_t* m_channel = nullptr;
-   std::unique_ptr<TlsTransport> m_tls; // null unless DNS over TLS was asked for
-   std::map<ares_socket_t, std::shared_ptr<Socket>> m_sockets;
+   std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
+   std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
+
+} // namespace cares_asio

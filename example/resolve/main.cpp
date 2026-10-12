@@ -62,7 +62,7 @@ struct Config
    std::string servers;
    std::string file; // where the URLs came from, which also asks for the one-line-per-host listing
    std::vector<std::string> hosts;
-   TlsOptions tls;
+   cares_asio::tls_options tls;
 };
 
 //
@@ -310,9 +310,9 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
 struct Lookup
 {
    boost::system::error_code ec;
-   AresResolver::Results endpoints;
+   cares_asio::resolver::results_type endpoints;
    boost::system::error_code httpsEc;
-   AresResolver::HttpsResults records;
+   cares_asio::resolver::https_results_type records;
 };
 
 using LookupFunction = std::function<awaitable<Lookup>(const std::string& host)>;
@@ -322,7 +322,8 @@ using LookupFunction = std::function<awaitable<Lookup>(const std::string& host)>
 //
 bool isNoRecord(const boost::system::error_code& ec)
 {
-   return ec == make_ares_error(ARES_ENODATA) || ec == make_ares_error(ARES_ENOTFOUND);
+   return ec == cares_asio::make_ares_error(ARES_ENODATA) ||
+          ec == cares_asio::make_ares_error(ARES_ENOTFOUND);
 }
 
 //
@@ -349,7 +350,7 @@ std::string toText(const ip::address& address, size_t width = 0)
                   address.is_v4() ? Color::v4 : Color::v6);
 }
 
-std::string toText(const HttpsRecord& record)
+std::string toText(const cares_asio::https_record& record)
 {
    //
    // An empty target is the record's own name, which is a bare dot in presentation form.
@@ -553,7 +554,7 @@ awaitable<void> resolveWithAsio(const Config& config)
 // keeping several queries in flight on a channel, and with --dot they share the connection as
 // well as the round trip.
 //
-awaitable<Lookup> lookupWithAres(AresResolver& resolver, const Config& config,
+awaitable<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config,
                                  const std::string& host)
 {
    spdlog::debug("resolving {}:{}...", host, config.service);
@@ -571,7 +572,7 @@ awaitable<Lookup> lookupWithAres(AresResolver& resolver, const Config& config,
    auto [order, ec, endpoints, httpsEc, records] =
       co_await experimental::make_parallel_group(
          resolver.async_resolve(host, config.service, deferred),
-         resolver.async_lookupHttps(host, deferred))
+         resolver.async_resolve_https(host, deferred))
          .async_wait(experimental::wait_for_all(), use_awaitable);
 
    //
@@ -580,14 +581,14 @@ awaitable<Lookup> lookupWithAres(AresResolver& resolver, const Config& config,
    // ARES_EBADNAME, ares_search_dnsrec() says ARES_ENOMEM (c-ares 1.34.5), so the address error
    // is the one to believe and repeating it as a memory problem would only mislead.
    //
-   if (ec == make_ares_error(ARES_EBADNAME))
+   if (ec == cares_asio::make_ares_error(ARES_EBADNAME))
       httpsEc = {};
 
    //
    // The records of a set come in no particular order, and not in the same one twice. By priority
    // is the order a client goes through them in, and it puts the alias form first.
    //
-   std::ranges::stable_sort(records, {}, &HttpsRecord::priority);
+   std::ranges::stable_sort(records, {}, &cares_asio::https_record::priority);
 
    co_return Lookup{ec, std::move(endpoints), httpsEc, std::move(records)};
 }
@@ -600,7 +601,7 @@ awaitable<Lookup> lookupWithAres(AresResolver& resolver, const Config& config,
 //
 awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
 {
-   std::optional<AresResolver> resolver; // only if there is a name to look up at all
+   std::optional<cares_asio::resolver> resolver; // only if there is a name to look up at all
    std::string addresses;
 
    for (const auto server : serversOf(servers))
@@ -626,7 +627,7 @@ awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
       {
          if (ec != error::operation_aborted)
             spdlog::error("--server {}: {}", named->name,
-                          ec ? ec.message() : make_ares_error(ARES_ENODATA).message());
+                          ec ? ec.message() : cares_asio::make_ares_error(ARES_ENODATA).message());
          co_return std::nullopt;
       }
 
@@ -657,8 +658,8 @@ awaitable<void> resolveWithAres(const Config& config)
    if (!servers)
       co_return;
 
-   AresResolver resolver(co_await this_coro::executor, config.tls);
-   if (auto ec = resolver.setServers(*servers))
+   cares_asio::resolver resolver(co_await this_coro::executor, config.tls);
+   if (auto ec = resolver.set_servers(*servers))
    {
       spdlog::error("--server '{}': {}", config.servers, ec.message());
       co_return;
