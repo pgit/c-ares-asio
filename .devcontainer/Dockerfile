@@ -3,7 +3,7 @@
 # that codespace creation stays fast. It happens to be the dependency image of the 'anyhttp'
 # project, which is where this devcontainer comes from -- nothing of that project itself is in it.
 #
-FROM docker.io/psedoc/anyhttp:0.28
+FROM docker.io/psedoc/anyhttp:0.30
 
 # ==================================================================================================
 

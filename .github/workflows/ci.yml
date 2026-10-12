@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: docker.io/psedoc/anyhttp:0.28
+      image: docker.io/psedoc/anyhttp:0.30
       # root for the checkout to be writable, and the sanitizers need to switch off address
       # space randomization and to trace their own process
       options: --user root --cap-add SYS_PTRACE --security-opt seccomp=unconfined
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: docker.io/psedoc/anyhttp:0.28
+      image: docker.io/psedoc/anyhttp:0.30
       options: --user root
 
     steps:

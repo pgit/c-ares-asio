@@ -17,10 +17,11 @@
         {
             "name": "devcontainer",
             "hidden": true,
-            "description": "The toolchain of .devcontainer: clang with libc++, which its Boost, spdlog and GoogleTest are built with",
+            "description": "The toolchain of .devcontainer: clang with libc++, and the Boost, spdlog and GoogleTest it has built with that in /opt/libc++",
             "inherits": "base",
             "cacheVariables": {
                 "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_PREFIX_PATH": "/opt/libc++",
                 "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers"
             }
         },
@@ -99,16 +100,14 @@
         {
             "name": "gcc",
             "displayName": "GCC, libstdc++",
-            "description": "GCC and its own standard library. The devcontainer's GoogleTest, Boost.ProgramOptions and spdlog are built for libc++, so GoogleTest is fetched and the 'resolve' example left out",
+            "description": "GCC and its own standard library, with the Boost, spdlog and GoogleTest that the devcontainer has built with that in /usr/local",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build-gcc",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_COMPILER": "g++",
-                "CMAKE_CXX_FLAGS": "-Wall -Wextra",
-                "CARES_ASIO_TLS": "OpenSSL",
-                "FETCHCONTENT_TRY_FIND_PACKAGE_MODE": "NEVER",
-                "CMAKE_DISABLE_FIND_PACKAGE_spdlog": "ON"
+                "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wno-missing-field-initializers",
+                "CARES_ASIO_TLS": "OpenSSL"
             }
         }
     ],
