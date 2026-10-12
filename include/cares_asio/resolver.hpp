@@ -20,6 +20,7 @@
 
 #include <ares.h>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -64,6 +65,21 @@ struct tls_options
    bool verify = true;
 };
 
+//
+// What the resolver has to say about its work goes to a function like this one, if set_logger()
+// was given any: the queries it starts and how they end, the sockets c-ares opens, and what the
+// TLS handshake negotiated or why it failed. The library itself writes nowhere.
+//
+enum class log_level
+{
+   debug,
+   info,
+   warning,
+   error
+};
+
+using log_function = std::function<void(log_level, std::string_view)>;
+
 // --------------------------------------------------------------------------------------------------
 
 class resolver
@@ -97,6 +113,12 @@ public:
    // empty, and leaves the channel untouched if the list cannot be parsed.
    //
    boost::system::error_code set_servers(std::string_view servers);
+
+   //
+   // Has 'logger' called with every message from here on, on whichever thread runs the executor.
+   // An empty function turns it off again, which is what a resolver starts out with.
+   //
+   void set_logger(log_function logger);
 
    //
    // Resolves 'host' for 'service' (a port number or service name), like ares_getaddrinfo() with
@@ -145,6 +167,7 @@ private:
    executor_type m_executor;
    boost::asio::steady_timer m_timer;
    ares_channel_t* m_channel = nullptr;
+   log_function m_logger; // declared ahead of the transport, which keeps a reference to it
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };

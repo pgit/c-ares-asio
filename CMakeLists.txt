@@ -64,6 +64,6 @@ add_library(cares_asio::cares_asio ALIAS cares_asio)
 target_sources(cares_asio PRIVATE "src/resolver.cpp" "src/tls_transport.cpp")
 target_include_directories(cares_asio PUBLIC "include")
 target_link_libraries(cares_asio PUBLIC Boost::headers c-ares::cares)
-target_link_libraries(cares_asio PRIVATE tls spdlog::spdlog_header_only)
+target_link_libraries(cares_asio PRIVATE tls)
 
 add_subdirectory(example/resolve)

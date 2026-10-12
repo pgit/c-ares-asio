@@ -1,6 +1,6 @@
 #include "tls_transport.hpp"
 
-#include <spdlog/spdlog.h>
+#include "log.hpp"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -151,7 +151,8 @@ struct tls_transport::tls_session
 
 // --------------------------------------------------------------------------------------------------
 
-tls_transport::tls_transport(tls_options options) : m_options(std::move(options))
+tls_transport::tls_transport(tls_options options, const log_function& logger)
+   : m_options(std::move(options)), m_logger(logger)
 {
    m_context = SSL_CTX_new(TLS_client_method());
    if (!m_context)
@@ -218,7 +219,7 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
       socklen_t length = sizeof(error);
       if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0)
       {
-         spdlog::debug("fd={} connect failed: {}", fd, std::strerror(error ? error : errno));
+         log_debug(m_logger, "fd={} connect failed: {}", fd, std::strerror(error ? error : errno));
          session->state = tls_session::phase::failed;
          return interest::none; // let c-ares pick the failure up through recv/send
       }
@@ -240,8 +241,8 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
    if (result == 1)
    {
       session->state = tls_session::phase::established;
-      spdlog::info("fd={} TLS established: {}", fd, handshake_info(session->ssl));
-      spdlog::info("fd={} TLS peer: {}", fd, peer_info(session->ssl));
+      log_info(m_logger, "fd={} TLS established: {}", fd, handshake_info(session->ssl));
+      log_info(m_logger, "fd={} TLS peer: {}", fd, peer_info(session->ssl));
       return interest::none;
    }
 
@@ -259,9 +260,9 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
       // connection that went away, so say what actually happened.
       //
       if (const auto result = SSL_get_verify_result(session->ssl); result != X509_V_OK)
-         spdlog::error("TLS handshake failed: {}", X509_verify_cert_error_string(result));
+         log_error(m_logger, "TLS handshake failed: {}", X509_verify_cert_error_string(result));
       else
-         spdlog::error("TLS handshake failed: {}", ssl_error());
+         log_error(m_logger, "TLS handshake failed: {}", ssl_error());
 
       session->state = tls_session::phase::failed;
       return interest::none;
@@ -273,14 +274,14 @@ bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
    session.ssl = SSL_new(m_context);
    if (!session.ssl)
    {
-      spdlog::error("SSL_new: {}", ssl_error());
+      log_error(m_logger, "SSL_new: {}", ssl_error());
       return false;
    }
 
    SSL_set_connect_state(session.ssl);
    if (SSL_set_fd(session.ssl, fd) != 1)
    {
-      spdlog::error("SSL_set_fd: {}", ssl_error());
+      log_error(m_logger, "SSL_set_fd: {}", ssl_error());
       return false;
    }
 
@@ -297,7 +298,7 @@ bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
          SSL_set_hostflags(session.ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
          if (SSL_set1_host(session.ssl, m_options.hostname.c_str()) != 1)
          {
-            spdlog::error("SSL_set1_host({}): {}", m_options.hostname, ssl_error());
+            log_error(m_logger, "SSL_set1_host({}): {}", m_options.hostname, ssl_error());
             return false;
          }
       }
@@ -386,7 +387,7 @@ ares_ssize_t tls_transport::on_recv(ares_socket_t fd, void* buffer, size_t lengt
       return 0; // clean shutdown, which is end of file as far as c-ares is concerned
 
    default:
-      spdlog::debug("fd={} SSL_read: {}", fd, ssl_error());
+      log_debug(m_logger, "fd={} SSL_read: {}", fd, ssl_error());
       session->state = tls_session::phase::failed;
       errno = ECONNRESET;
       return -1;
@@ -430,7 +431,7 @@ ares_ssize_t tls_transport::on_send(ares_socket_t fd, const void* buffer, size_t
       return -1;
 
    default:
-      spdlog::debug("fd={} SSL_write: {}", fd, ssl_error());
+      log_debug(m_logger, "fd={} SSL_write: {}", fd, ssl_error());
       session->state = tls_session::phase::failed;
       errno = ECONNRESET;
       return -1;

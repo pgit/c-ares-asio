@@ -38,7 +38,10 @@ public:
       write
    };
 
-   explicit tls_transport(tls_options options);
+   //
+   // 'logger' is the resolver's, and looked at afresh for every message.
+   //
+   tls_transport(tls_options options, const log_function& logger);
    ~tls_transport();
 
    tls_transport(const tls_transport&) = delete;
@@ -78,6 +81,7 @@ private:
    static const struct ares_socket_functions_ex& functions();
 
    tls_options m_options;
+   const log_function& m_logger;
    SSL_CTX* m_context = nullptr;
    std::map<ares_socket_t, std::unique_ptr<tls_session>> m_sessions;
 };

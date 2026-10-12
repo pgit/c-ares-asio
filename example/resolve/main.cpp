@@ -304,6 +304,24 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
 }
 
 //
+// The library does not log by itself, it only says what there is to log.
+//
+void logToSpdlog(cares_asio::log_level level, std::string_view message)
+{
+   switch (level)
+   {
+   case cares_asio::log_level::debug:
+      return spdlog::debug("{}", message);
+   case cares_asio::log_level::info:
+      return spdlog::info("{}", message);
+   case cares_asio::log_level::warning:
+      return spdlog::warn("{}", message);
+   case cares_asio::log_level::error:
+      return spdlog::error("{}", message);
+   }
+}
+
+//
 // What came back for one name. The ASIO resolver has no way to ask for the HTTPS record, so that
 // half stays empty there.
 //
@@ -619,7 +637,10 @@ awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
       }
 
       if (!resolver)
+      {
          resolver.emplace(co_await this_coro::executor);
+         resolver->set_logger(&logToSpdlog);
+      }
 
       spdlog::debug("looking up DNS server {}...", named->name);
       const auto [ec, endpoints] = co_await resolver->async_resolve(named->name, "", as_tuple);
@@ -659,6 +680,7 @@ awaitable<void> resolveWithAres(const Config& config)
       co_return;
 
    cares_asio::resolver resolver(co_await this_coro::executor, config.tls);
+   resolver.set_logger(&logToSpdlog);
    if (auto ec = resolver.set_servers(*servers))
    {
       spdlog::error("--server '{}': {}", config.servers, ec.message());

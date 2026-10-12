@@ -1,5 +1,6 @@
 #include <cares_asio/resolver.hpp>
 
+#include "log.hpp"
 #include "tls_transport.hpp"
 
 #include <boost/asio/append.hpp>
@@ -8,8 +9,6 @@
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/system/system_error.hpp>
-
-#include <spdlog/spdlog.h>
 
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -157,6 +156,7 @@ std::string with_port(std::string_view servers, unsigned port, bool force)
 struct resolve_request
 {
    any_io_executor executor;
+   const log_function& logger;
    resolver::resolve_handler handler;
 };
 
@@ -166,6 +166,7 @@ struct resolve_request
 struct https_request
 {
    any_io_executor executor;
+   const log_function& logger;
    resolver::https_handler handler;
 };
 
@@ -297,8 +298,8 @@ void https_callback(void* arg, ares_status_t status, size_t timeouts,
                     const ares_dns_record_t* dnsrec)
 {
    std::unique_ptr<https_request> request(static_cast<https_request*>(arg));
-   spdlog::debug("ares_search_dnsrec: {} ({} timeout(s))", ares_strerror(static_cast<int>(status)),
-                 timeouts);
+   detail::log_debug(request->logger, "ares_search_dnsrec: {} ({} timeout(s))",
+                     ares_strerror(static_cast<int>(status)), timeouts);
 
    const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
                       ? error_code(error::operation_aborted)
@@ -366,7 +367,8 @@ std::optional<ip::tcp::endpoint> to_endpoint(const ares_addrinfo_node& node)
 void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
 {
    std::unique_ptr<resolve_request> request(static_cast<resolve_request*>(arg));
-   spdlog::debug("ares_getaddrinfo: {} ({} timeout(s))", ares_strerror(status), timeouts);
+   detail::log_debug(request->logger, "ares_getaddrinfo: {} ({} timeout(s))", ares_strerror(status),
+                     timeouts);
 
    //
    // Report the c-ares way of being cancelled as the ASIO one, so that the operation behaves like
@@ -432,7 +434,7 @@ resolver::resolver(executor_type executor, const tls_options& tls)
 
    if (tls.enabled)
    {
-      m_tls = std::make_unique<detail::tls_transport>(tls);
+      m_tls = std::make_unique<detail::tls_transport>(tls, m_logger);
       m_tls->install(m_channel); // before the channel has had a chance to open anything
    }
 }
@@ -465,9 +467,11 @@ boost::system::error_code resolver::set_servers(std::string_view servers)
    if (list.empty())
       return {};
 
-   spdlog::debug("using DNS server(s) {}", list);
+   detail::log_debug(m_logger, "using DNS server(s) {}", list);
    return make_ares_error(ares_set_servers_csv(m_channel, list.c_str()));
 }
+
+void resolver::set_logger(log_function logger) { m_logger = std::move(logger); }
 
 resolver::~resolver()
 {
@@ -491,13 +495,13 @@ void resolver::start_resolve(std::string host, std::string service, resolve_hand
          ares_cancel(m_channel);
       });
 
-   auto request = std::make_unique<resolve_request>(m_executor, std::move(handler));
+   auto request = std::make_unique<resolve_request>(m_executor, m_logger, std::move(handler));
 
    ares_addrinfo_hints hints{};
    hints.ai_family = AF_UNSPEC;
    hints.ai_socktype = SOCK_STREAM;
 
-   spdlog::debug("ares_getaddrinfo({}, {})...", host, service);
+   detail::log_debug(m_logger, "ares_getaddrinfo({}, {})...", host, service);
    ares_getaddrinfo(m_channel, host.c_str(), service.empty() ? nullptr : service.c_str(), &hints,
                     &addrinfo_callback, request.release());
 
@@ -511,7 +515,7 @@ void resolver::start_resolve_https(std::string host, https_handler handler)
          ares_cancel(m_channel);
       });
 
-   auto request = std::make_unique<https_request>(m_executor, std::move(handler));
+   auto request = std::make_unique<https_request>(m_executor, m_logger, std::move(handler));
 
    //
    // ares_search_dnsrec() wants the question as a record rather than as a name, so that it can
@@ -525,7 +529,7 @@ void resolver::start_resolve_https(std::string host, https_handler handler)
 
    if (status == ARES_SUCCESS)
    {
-      spdlog::debug("ares_search_dnsrec({}, HTTPS)...", host);
+      detail::log_debug(m_logger, "ares_search_dnsrec({}, HTTPS)...", host);
 
       //
       // The callback owns the request from here on, and may well have run and freed it before
@@ -548,7 +552,7 @@ void resolver::start_resolve_https(std::string host, https_handler handler)
    // finish. Both ways of getting here mean a bug or an allocation failure right in this
    // function, not anything the name could have done.
    //
-   spdlog::error("HTTPS query for {}: {}", host, ares_strerror(status));
+   detail::log_error(m_logger, "HTTPS query for {}: {}", host, ares_strerror(status));
    post(m_executor,
         append(std::move(request->handler), make_ares_error(status), https_results_type()));
 }
@@ -562,7 +566,8 @@ void resolver::socket_state_callback(void* data, ares_socket_t fd, int readable,
 
 void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
 {
-   spdlog::debug("socket state: fd={} readable={} writable={}", fd, readable, writable);
+   detail::log_debug(m_logger, "socket state: fd={} readable={} writable={}", fd, readable,
+                     writable);
 
    //
    // Neither readable nor writable means c-ares is about to close the socket. The file descriptor
@@ -681,7 +686,7 @@ void resolver::update_timeout()
       if (ec)
          return; // superseded by a later timeout, or cancelled
 
-      spdlog::debug("query timeout");
+      detail::log_debug(m_logger, "query timeout");
       ares_process_fds(m_channel, nullptr, 0, ARES_PROCESS_FLAG_NONE);
       update_timeout();
    });
