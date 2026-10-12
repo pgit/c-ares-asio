@@ -129,7 +129,7 @@ std::string with_port(std::string_view servers, unsigned port, bool force)
          result += ',';
 
       const bool ported = has_port(server);
-      if (server.contains("://") || (ported && !force))
+      if (server.find("://") != std::string_view::npos || (ported && !force))
       {
          result += server;
          continue;
@@ -141,7 +141,7 @@ std::string with_port(std::string_view servers, unsigned port, bool force)
       //
       // A bare IPv6 address only needs its brackets once there is a port behind it.
       //
-      if (!server.starts_with('[') && server.contains(':'))
+      if (!server.starts_with('[') && server.find(':') != std::string_view::npos)
          result += std::format("[{}]:{}", server, port);
       else
          result += std::format("{}:{}", server, port);

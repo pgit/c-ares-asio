@@ -1,0 +1,134 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "devcontainer",
+            "hidden": true,
+            "description": "The toolchain of .devcontainer: clang with libc++, which its Boost, spdlog and GoogleTest are built with",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers"
+            }
+        },
+        {
+            "name": "aws-lc",
+            "hidden": true,
+            "description": "AWS-LC as the TLS library, where the devcontainer has it",
+            "cacheVariables": {
+                "CARES_ASIO_TLS": "AWS-LC",
+                "ssl_ROOT": "/opt/boringssl"
+            }
+        },
+        {
+            "name": "dev",
+            "displayName": "Debug",
+            "description": "What the library is developed with: a debug build against AWS-LC, in build/",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "asan",
+            "displayName": "AddressSanitizer + UBSan",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+            }
+        },
+        {
+            "name": "openssl",
+            "displayName": "OpenSSL, shared",
+            "description": "The system's OpenSSL instead of AWS-LC, and the library as a shared one",
+            "inherits": "devcontainer",
+            "binaryDir": "${sourceDir}/build-openssl",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CARES_ASIO_TLS": "OpenSSL",
+                "BUILD_SHARED_LIBS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan"
+        },
+        {
+            "name": "openssl",
+            "configurePreset": "openssl"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "inherits": "base"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release",
+            "inherits": "base"
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan",
+            "inherits": "base"
+        },
+        {
+            "name": "openssl",
+            "configurePreset": "openssl",
+            "inherits": "base"
+        }
+    ]
+}

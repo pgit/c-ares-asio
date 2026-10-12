@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cares_asio/error.hpp>
+#include <cares_asio/export.hpp>
 
 #include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/any_io_executor.hpp>
@@ -82,7 +83,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
 
 // --------------------------------------------------------------------------------------------------
 
-class resolver
+class CARES_ASIO_EXPORT resolver
 {
 public:
    using executor_type = boost::asio::any_io_executor;
