@@ -352,7 +352,12 @@ bool isNoRecord(const boost::system::error_code& ec)
 // Host names are yellow. Only a terminal gets any of it unless --color says otherwise, which is
 // where spdlog colours the log level as well.
 //
-enum class Color { name = 33, v6 = 34, v4 = 35 };
+enum class Color
+{
+   name = 33,
+   v6 = 34,
+   v4 = 35
+};
 
 bool useColor = false;
 
