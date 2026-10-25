@@ -12,6 +12,17 @@ if (NOT MRDOCS_EXECUTABLE)
 endif()
 
 #
+# The reference comes from an ASIO build. The comments it is made of are the same in a COROSIO
+# one -- what differs are the type aliases of the runtime layer, which cares_asio/asio/runtime.hpp
+# documents for both -- and the include directories of capy and corosio are build-interface
+# generator expressions, which the compilation database below cannot be written with.
+#
+if (CARES_ASIO_COROSIO)
+    message(STATUS "cares_asio: no 'docs' target in a COROSIO build, configure an ASIO one for it")
+    return()
+endif()
+
+#
 # MrDocs reads the headers the way a compiler does, and learns what a compiler is told from a
 # compilation database. The one of the build will not do: it has the tests and the examples in it
 # as well, which are nothing to document and take libraries the headers have no use for. So here

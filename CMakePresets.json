@@ -98,6 +98,34 @@
             }
         },
         {
+            "name": "corosio",
+            "displayName": "corosio",
+            "description": "The library on capy/corosio instead of Boost.Asio, in build-corosio/: coroutines only, and capy and corosio are fetched at the commits CMakeLists.txt pins",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-corosio",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CARES_ASIO_API": "COROSIO"
+            }
+        },
+        {
+            "name": "corosio-asan",
+            "displayName": "corosio, AddressSanitizer + UBSan",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-corosio-asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CARES_ASIO_API": "COROSIO",
+                "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+            }
+        },
+        {
             "name": "gcc",
             "displayName": "GCC, libstdc++",
             "description": "GCC and its own standard library, with the Boost, spdlog and GoogleTest that the devcontainer has built with that in /usr/local",
@@ -135,6 +163,14 @@
         {
             "name": "gcc",
             "configurePreset": "gcc"
+        },
+        {
+            "name": "corosio",
+            "configurePreset": "corosio"
+        },
+        {
+            "name": "corosio-asan",
+            "configurePreset": "corosio-asan"
         }
     ],
     "testPresets": [
@@ -173,6 +209,16 @@
         {
             "name": "gcc",
             "configurePreset": "gcc",
+            "inherits": "base"
+        },
+        {
+            "name": "corosio",
+            "configurePreset": "corosio",
+            "inherits": "base"
+        },
+        {
+            "name": "corosio-asan",
+            "configurePreset": "corosio-asan",
             "inherits": "base"
         }
     ]

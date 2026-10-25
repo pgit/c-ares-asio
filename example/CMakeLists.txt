@@ -1,8 +1,17 @@
 #
-# The shortest program that resolves a name, which is also the one the README shows.
+# The shortest program that resolves a name, which is also the one the README shows. There is one
+# for each runtime, as that is what the two spellings of the API are there to be looked at.
 #
-add_executable(cares_asio_example_minimal minimal.cpp)
+string(TOLOWER ${CARES_ASIO_API} cares_asio_api_dir)
+
+add_executable(cares_asio_example_minimal ${cares_asio_api_dir}/minimal.cpp)
 set_target_properties(cares_asio_example_minimal PROPERTIES OUTPUT_NAME minimal)
 target_link_libraries(cares_asio_example_minimal PRIVATE cares_asio::cares_asio)
 
-add_subdirectory(resolve)
+#
+# The command line is written in ASIO idioms throughout -- a parallel group of lookups, a signal
+# set, ASIO's own resolver to compare against -- and is left out of a COROSIO build.
+#
+if (CARES_ASIO_ASIO)
+    add_subdirectory(resolve)
+endif()

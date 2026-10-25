@@ -18,20 +18,32 @@ FetchContent_MakeAvailable(googletest)
 # The tests ask a DNS server of their own on the loopback interface, see fake_dns_server.hpp, so
 # they need no network and say the same wherever they run.
 #
+# Most of them are written in the spelling that both runtimes have (resolver::resolve(), see
+# resolver_fixture.hpp) and are built on either. What is about one runtime only -- completion
+# tokens here, stop tokens there -- is in asio/ or corosio/, next to the event loop fixture of
+# that runtime, and only the one of this build is compiled. The fake DNS server is Boost.Asio's
+# in both.
+#
 add_executable(
     cares_asio_tests
-    async_test.cpp
     error_test.cpp
+    event_loop_fixture.hpp
     fake_dns_server.cpp
     fake_dns_server.hpp
     https_test.cpp
     resolver_fixture.hpp
     resolver_test.cpp
-    run.hpp
     server_list_test.cpp
     test_certificate.cpp
     test_certificate.hpp
     tls_test.cpp)
+
+if (CARES_ASIO_COROSIO)
+    target_sources(cares_asio_tests PRIVATE corosio/event_loop_fixture.hpp corosio/stop_test.cpp)
+else()
+    target_sources(cares_asio_tests PRIVATE asio/async_test.cpp asio/event_loop_fixture.hpp
+                                            asio/run.hpp)
+endif()
 
 #
 # What is not part of the interface is not exported from a shared library either, so the one
@@ -42,9 +54,17 @@ target_include_directories(cares_asio_tests PRIVATE ../src)
 
 target_compile_definitions(cares_asio_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
 
+#
+# The fake DNS server is written in Boost.Asio whichever runtime the library was built on, so the
+# tests of a COROSIO build need Boost as well -- the library itself does not.
+#
+if (CARES_ASIO_COROSIO)
+    find_package(Boost ${CARES_ASIO_BOOST_VERSION} REQUIRED)
+endif()
+
 # the fake server speaks TLS as well, with the same library the resolver was built against
 target_link_libraries(
-    cares_asio_tests PRIVATE cares_asio::cares_asio GTest::gmock GTest::gtest_main
+    cares_asio_tests PRIVATE cares_asio::cares_asio Boost::headers GTest::gmock GTest::gtest_main
                              ${cares_asio_tls_libraries} Threads::Threads)
 
 include(GoogleTest)

@@ -24,6 +24,25 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 # Nothing in here sets a compiler, a standard library or warning flags: that is up to the one who
 # builds, and CMakePresets.json has what this repository is developed with.
 #
+
+#
+# The I/O runtime, one per build tree: ASIO (completion tokens, on Boost.Asio) or COROSIO
+# (coroutines only, on capy/corosio). The code tests CARES_ASIO_ASIO or CARES_ASIO_COROSIO,
+# exactly one of which is 1, from the generated cares_asio/config.hpp. See doc/corosio.md.
+#
+set(CARES_ASIO_API "ASIO" CACHE STRING "I/O runtime to build on: ASIO or COROSIO")
+set_property(CACHE CARES_ASIO_API PROPERTY STRINGS ASIO COROSIO)
+
+#
+# capy and corosio are built from pinned sources as part of a COROSIO build and are not installed,
+# so there is nothing an installed COROSIO build could be linked against.
+#
+if (CARES_ASIO_API STREQUAL "COROSIO")
+    set(cares_asio_install_default OFF)
+else()
+    set(cares_asio_install_default ${PROJECT_IS_TOP_LEVEL})
+endif()
+
 if (PROJECT_IS_TOP_LEVEL AND (NOT DEFINED BUILD_TESTING OR BUILD_TESTING))
     set(cares_asio_tests_default ON)
 else()
@@ -34,7 +53,8 @@ option(CARES_ASIO_BUILD_TESTS "Build the tests of cares_asio" ${cares_asio_tests
 option(CARES_ASIO_BUILD_EXAMPLES "Build the examples of cares_asio" ${PROJECT_IS_TOP_LEVEL})
 option(CARES_ASIO_BUILD_DOCS "Add the 'docs' target, where MrDocs is there to make them"
        ${PROJECT_IS_TOP_LEVEL})
-option(CARES_ASIO_INSTALL "Generate the install rules of cares_asio" ${PROJECT_IS_TOP_LEVEL})
+option(CARES_ASIO_INSTALL "Generate the install rules of cares_asio"
+       ${cares_asio_install_default})
 
 #
 # c-ares has no DNS over TLS of its own -- see src/tls_transport.hpp. Either library will do: the
@@ -53,9 +73,46 @@ set(CARES_ASIO_BOOST_VERSION 1.88)
 set(CARES_ASIO_CARES_VERSION 1.34) # ares_process_fds() was added in 1.34
 set(CARES_ASIO_OPENSSL_VERSION 3.2) # SSL_get0_group_name() was added in 3.2
 
-find_package(Boost ${CARES_ASIO_BOOST_VERSION} REQUIRED)
 find_package(Threads REQUIRED)
 find_package(c-ares ${CARES_ASIO_CARES_VERSION} CONFIG REQUIRED)
+
+if (CARES_ASIO_API STREQUAL "ASIO")
+    set(CARES_ASIO_ASIO 1)
+    set(CARES_ASIO_COROSIO 0)
+    set(cares_asio_runtime_libraries Boost::headers)
+    find_package(Boost ${CARES_ASIO_BOOST_VERSION} REQUIRED)
+    message(STATUS "cares_asio: using I/O runtime Boost.Asio ${Boost_VERSION}")
+elseif (CARES_ASIO_API STREQUAL "COROSIO")
+    set(CARES_ASIO_ASIO 0)
+    set(CARES_ASIO_COROSIO 1)
+    set(cares_asio_runtime_libraries Boost::corosio Boost::capy)
+
+    #
+    # Pinned: both are pre-release and change their API on 'develop' without notice, so moving a
+    # pin is a commit of its own. They are built as part of this build, from their sources, and
+    # are not installed along with the library -- a consumer of an installed COROSIO build needs
+    # them in its own build.
+    #
+    include(FetchContent)
+    foreach (option TESTS EXAMPLES BENCH)
+        set(BOOST_CAPY_BUILD_${option} OFF CACHE BOOL "" FORCE)
+        set(BOOST_COROSIO_BUILD_${option} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    FetchContent_Declare(
+        capy
+        GIT_REPOSITORY https://github.com/cppalliance/capy.git
+        GIT_TAG a372a6b054261f29497ac0d19c2a9533f9eaad40
+        EXCLUDE_FROM_ALL)
+    FetchContent_Declare(
+        corosio
+        GIT_REPOSITORY https://github.com/cppalliance/corosio.git
+        GIT_TAG a80ce002fd8cb27c893e50146990dc66d96cac02
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(capy corosio)
+    message(STATUS "cares_asio: using I/O runtime capy/corosio")
+else()
+    message(FATAL_ERROR "CARES_ASIO_API is '${CARES_ASIO_API}', expected ASIO or COROSIO")
+endif()
 
 #
 # https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542 is a use-after-free in
@@ -92,32 +149,50 @@ set(cares_asio_generated_include_dir "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(cmake/version.hpp.in "${cares_asio_generated_include_dir}/cares_asio/version.hpp"
                @ONLY)
 
+configure_file(cmake/config.hpp.in "${cares_asio_generated_include_dir}/cares_asio/config.hpp"
+               @ONLY)
+
 include(GenerateExportHeader)
 generate_export_header(
     cares_asio
     BASE_NAME CARES_ASIO
     EXPORT_FILE_NAME "${cares_asio_generated_include_dir}/cares_asio/export.hpp")
 
+#
+# What belongs to one runtime only lives in asio/ or corosio/, under src/ as well as under
+# include/cares_asio/, and only the one of this build is compiled or installed.
+#
+string(TOLOWER ${CARES_ASIO_API} cares_asio_api_dir)
+
 target_sources(
     cares_asio
-    PRIVATE src/log.hpp
+    PRIVATE src/${cares_asio_api_dir}/event_loop.hpp
+            src/event_loop.hpp
+            src/log.hpp
             src/resolver.cpp
             src/server_list.cpp
             src/server_list.hpp
+            src/socket_functions.cpp
+            src/socket_functions.hpp
             src/tls_transport.cpp
             src/tls_transport.hpp
     PUBLIC FILE_SET HEADERS
            BASE_DIRS include "${cares_asio_generated_include_dir}"
            FILES include/cares_asio.hpp
+                 include/cares_asio/${cares_asio_api_dir}/runtime.hpp
                  include/cares_asio/error.hpp
                  include/cares_asio/resolver.hpp
+                 include/cares_asio/runtime.hpp
+                 "${cares_asio_generated_include_dir}/cares_asio/config.hpp"
                  "${cares_asio_generated_include_dir}/cares_asio/export.hpp"
                  "${cares_asio_generated_include_dir}/cares_asio/version.hpp")
 
 target_compile_features(cares_asio PUBLIC cxx_std_20)
 
 # our own sources stay clear of the deprecated ASIO interfaces
-target_compile_definitions(cares_asio PRIVATE BOOST_ASIO_NO_DEPRECATED)
+if (CARES_ASIO_ASIO)
+    target_compile_definitions(cares_asio PRIVATE BOOST_ASIO_NO_DEPRECATED)
+endif()
 
 get_target_property(cares_asio_type cares_asio TYPE)
 if (cares_asio_type STREQUAL "STATIC_LIBRARY")
@@ -131,7 +206,7 @@ endif()
 #
 target_link_libraries(
     cares_asio
-    PUBLIC Boost::headers c-ares::cares
+    PUBLIC ${cares_asio_runtime_libraries} c-ares::cares
     PRIVATE ${cares_asio_tls_libraries} Threads::Threads)
 
 #
@@ -149,6 +224,12 @@ set_target_properties(
 # --------------------------------------------------------------------------------------------------
 
 if (CARES_ASIO_INSTALL)
+    if (CARES_ASIO_COROSIO)
+        message(FATAL_ERROR "CARES_ASIO_INSTALL does not work with CARES_ASIO_API=COROSIO: capy "
+                            "and corosio are built from pinned sources here and not installed, so "
+                            "the exported target would point at libraries that are not there.")
+    endif()
+
     include(cmake/install.cmake)
 endif()
 

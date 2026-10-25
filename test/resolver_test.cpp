@@ -7,15 +7,13 @@
 //
 #include "resolver_fixture.hpp"
 
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-
 #include <cstdlib>
 #include <format>
 #include <map>
+#include <tuple>
+#include <utility>
 
-using namespace boost::asio;
-using boost::system::error_code;
+using cares_asio::error_code;
 using cares_asio::make_ares_error;
 using testing::ElementsAre;
 using testing::IsEmpty;
@@ -23,10 +21,7 @@ using testing::UnorderedElementsAre;
 
 using Resolver = resolver_fixture;
 
-TEST_F(Resolver, HasTheExecutorItWasGiven)
-{
-   EXPECT_EQ(resolver.get_executor(), context.get_executor());
-}
+TEST_F(Resolver, HasTheExecutorItWasGiven) { EXPECT_EQ(resolver.get_executor(), executor()); }
 
 TEST_F(Resolver, ResolvesBothAddressFamilies)
 {
@@ -160,15 +155,14 @@ TEST_F(Resolver, GivesUpOnAServerThatDoesNotAnswer)
    // set up -- so this takes a resolver of its own.
    //
    ASSERT_EQ(::setenv("RES_OPTIONS", "timeout:1 attempts:1", 1), 0);
-   cares_asio::resolver impatient(context.get_executor());
+   cares_asio::resolver impatient(executor());
    ASSERT_EQ(::unsetenv("RES_OPTIONS"), 0);
 
    ASSERT_FALSE(impatient.set_servers(server.address()));
    server.set_silent(true);
 
    const auto started = std::chrono::steady_clock::now();
-   const auto [ec, endpoints] =
-      run(context, impatient.async_resolve("www.example.test", "443", awaited));
+   const auto [ec, endpoints] = run(impatient.resolve("www.example.test", "443"));
    const auto elapsed = std::chrono::steady_clock::now() - started;
 
    EXPECT_EQ(ec, make_ares_error(ARES_ETIMEOUT)) << ec.message();
@@ -200,18 +194,19 @@ TEST_F(Resolver, KeepsManyLookupsApart)
    for (int i = 0; i < count; ++i)
       server.add_address(std::format("host{}.example.test", i), std::format("192.0.2.{}", i));
 
-   std::map<int, std::pair<error_code, cares_asio::resolver::results_type>> results;
+   std::map<int, std::tuple<error_code, cares_asio::resolver::results_type>> results;
    for (int i = 0; i < count; ++i)
-      resolver.async_resolve(
-         std::format("host{}.example.test", i), "443",
-         [&results, i](error_code ec, auto endpoints) { results[i] = {ec, std::move(endpoints)}; });
+      start([](cares_asio::resolver& resolver, auto& results, int i) -> cares_asio::Task<void> {
+         results[i] = co_await resolver.resolve(std::format("host{}.example.test", i), "443");
+      }(resolver, results, i));
 
-   ASSERT_TRUE(run_until(context, [&] { return results.size() == count; }));
+   ASSERT_TRUE(run_until([&] { return results.size() == count; }));
 
    for (int i = 0; i < count; ++i)
    {
-      EXPECT_FALSE(results[i].first) << i << ": " << results[i].first.message();
-      EXPECT_THAT(results[i].second, ElementsAre(endpoint(std::format("192.0.2.{}", i), 443))) << i;
+      const auto& [ec, endpoints] = results[i];
+      EXPECT_FALSE(ec) << i << ": " << ec.message();
+      EXPECT_THAT(endpoints, ElementsAre(endpoint(std::format("192.0.2.{}", i), 443))) << i;
    }
 }
 
@@ -255,7 +250,7 @@ TEST_F(Resolver, KeepsItsServersWhenGivenNone)
 
 TEST_F(Resolver, AsksTheServerItWasToldLast)
 {
-   fake_dns_server other(context.get_executor());
+   fake_dns_server other(server_executor());
    other.add_address("www.example.test", "192.0.2.2");
    server.add_address("www.example.test", "192.0.2.1");
 

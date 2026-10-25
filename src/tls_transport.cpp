@@ -4,6 +4,7 @@
 #include "tls_transport.hpp"
 
 #include "log.hpp"
+#include "socket_functions.hpp"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -220,9 +221,26 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
 
       int error = 0;
       socklen_t length = sizeof(error);
-      if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0)
+      if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0)
+         error = errno;
+
+      //
+      // SO_ERROR is consume-on-read, and an event loop that reads it in order to report the
+      // failure of the socket as the failure of the wait -- corosio's does -- leaves a zero
+      // behind. getpeername() answers the same question and keeps answering it: a socket whose
+      // connect did not go through has no peer.
+      //
+      if (error == 0)
       {
-         log_debug(m_logger, "fd={} connect failed: {}", fd, std::strerror(error ? error : errno));
+         sockaddr_storage peer{};
+         socklen_t peer_length = sizeof(peer);
+         if (::getpeername(fd, reinterpret_cast<sockaddr*>(&peer), &peer_length) != 0)
+            error = errno;
+      }
+
+      if (error != 0)
+      {
+         log_debug(m_logger, "fd={} connect failed: {}", fd, std::strerror(error));
          session->state = tls_session::phase::failed;
          return interest::none; // let c-ares pick the failure up through recv/send
       }
@@ -462,30 +480,14 @@ const struct ares_socket_functions_ex& tls_transport::functions()
          return static_cast<tls_transport*>(data)->on_close(fd);
       },
 
+      //
+      // The same as the plain socket functions answer, fast open turned down and all: the
+      // handshake needs a connection before the first write just as much, see
+      // socket_functions.hpp.
+      //
       .asetsockopt = [](ares_socket_t fd, ares_socket_opt_t opt, const void* value,
-                        ares_socklen_t size, void*) -> int {
-         switch (opt)
-         {
-         case ARES_SOCKET_OPT_SENDBUF_SIZE:
-            return ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, value, size);
-
-         case ARES_SOCKET_OPT_RECVBUF_SIZE:
-            return ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, value, size);
-
-         case ARES_SOCKET_OPT_BIND_DEVICE:
-            return ::setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, value, size);
-
-         case ARES_SOCKET_OPT_TCP_FASTOPEN:
-            //
-            // Fast open would defer the connect to the first write, and the first write is the
-            // one we need a finished handshake for. ENOSYS tells c-ares we mean it.
-            //
-            errno = ENOSYS;
-            return -1;
-         }
-
-         errno = ENOSYS;
-         return -1;
+                        ares_socklen_t size, void*) -> int { //
+         return set_socket_option(fd, opt, value, size);
       },
 
       .aconnect = [](ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length,
