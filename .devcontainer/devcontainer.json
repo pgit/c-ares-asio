@@ -22,7 +22,8 @@
 				"lldb.showDisassembly": "never",
 				"[cpp]": {
 					"editor.defaultFormatter": "xaver.clang-format"
-			   }
+			   },
+				"cmake.ctest.testExplorerIntegrationEnabled": false
 			},
 
 			// Add the IDs of extensions you want installed when the container is created.
@@ -36,7 +37,8 @@
 				"vadimcn.vscode-lldb",
 				"xaver.clang-format",
 				"github.vscode-github-actions",
-				"anthropic.claude-code"
+				"anthropic.claude-code",
+				"matepek.vscode-catch2-test-adapter"
 			]
 		}
 	},
