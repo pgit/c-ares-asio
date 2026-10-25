@@ -3,13 +3,20 @@
 A command line for the library, and the place where it gets tried out.
 
 `resolve` looks up the host names given on the command line, or those of the URLs listed in a
-file, several at a time. By default it uses c-ares, driven by the ASIO event loop; with `--asio` it
-uses ASIO's own `ip::tcp::resolver` instead, which runs `getaddrinfo()` on an internal thread. Both
-should print the same addresses -- only the c-ares path also looks up the HTTPS record, since
-`getaddrinfo()` answers with addresses and nothing else.
+file, several at a time. By default it uses c-ares, driven by the event loop of the runtime the
+library was built on; with `--native` it uses the resolver of that runtime instead -- ASIO's
+`ip::tcp::resolver` or corosio's `resolver`, both of which run `getaddrinfo()` on a thread of
+their own. Both should print the same addresses -- only the c-ares path also looks up the HTTPS
+record, since `getaddrinfo()` answers with addresses and nothing else.
 
 It is built along with the library where Boost.ProgramOptions and spdlog are found, as
-`build/example/resolve/resolve`.
+`build/example/resolve/resolve`, and on either runtime: what it needs of its event loop -- the
+loop itself, the signal handling, the workers of `--concurrency`, the resolver of the runtime --
+is in [`runtime.hpp`](runtime.hpp), one file per runtime, so that the program itself is the same
+on both. `build-corosio/example/resolve/resolve` is the one on capy/corosio, see
+[doc/corosio.md](../../doc/corosio.md).
+
+(`--native` was `--asio` until the library grew a second runtime.)
 
 ## Running
 
@@ -23,16 +30,17 @@ $ build/example/resolve/resolve -v localhost www.google.com
 ...
 ```
 
-`--service` selects the service name or port number to resolve for, `--asio` switches to the ASIO
-resolver, `--file` reads the names from a file of URLs, `--concurrency` sets how many of them are
+`--service` selects the service name or port number to resolve for, `--native` switches to the
+resolver of the runtime, `--file` reads the names from a file of URLs, `--concurrency` sets how many of them are
 looked up at the same time (`--concurrency 1` for strictly one after the other, which is the
 easiest to follow with `-v`), `--ordered` keeps the output in the order the names were given,
 `--color` keeps the colours where the output does not go to a terminal (`| less -R`), `--help`
 lists all options.
 
-`Ctrl-C` interrupts a lookup cleanly: it cancels the operation instead of stopping the
-`io_context`, which takes every pending query on the channel with it -- exactly what `Ctrl-C` is
-after, and nothing else here cancels.
+`Ctrl-C` interrupts a lookup cleanly: it cancels the operation instead of stopping the event loop,
+which takes every pending query on the channel with it -- exactly what `Ctrl-C` is after, and
+nothing else here cancels. The cancellation is a cancellation slot on Boost.Asio and a
+`std::stop_token` on corosio, which is the one thing `Ctrl-C` looks different behind.
 
 `-v` also shows what the library has to say. It does not log by itself, so that is the function
 given to `resolver::set_logger()` passing the messages on to spdlog.
@@ -81,7 +89,8 @@ www.hobbylobby.com                   149.126.77.120   -                         
 `--concurrency` (10 unless told otherwise) is the number of names in flight at any time, with or
 without `--file`. It is that many coroutines, each taking the next name off the list, waiting for
 its answer and coming back for more, held together by a ranged
-[`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html).
+[`experimental::make_parallel_group`](https://www.boost.org/doc/libs/release/doc/html/boost_asio/reference/experimental__make_parallel_group.html)
+-- or, on corosio, by `capy::when_all()` over the same coroutines.
 There is still one channel and one thread: c-ares keeps all the queries apart by itself, over UDP
 as well as pipelined on the one connection `--dot` has. For the 1000 names of a list of popular
 sites, asked of 1.1.1.1:
@@ -96,9 +105,10 @@ given instead, which makes two runs comparable line by line. The price is that a
 takes its time, and a timeout is several seconds, holds back every row behind it: none of the
 lookups, but all of the progress.
 
-With `--asio`, the number makes no difference: `getaddrinfo()` blocks, ASIO calls it on a single
-thread unless its `resolver.threads` configuration says otherwise, and however many lookups are
-handed over at once, they are answered one after the other.
+With `--native`, the number makes little difference: `getaddrinfo()` blocks, and what the runtime
+has to call it on is what it really has in flight. ASIO uses a single thread unless its
+`resolver.threads` configuration says otherwise, so its lookups are answered strictly one after
+the other; corosio has a small pool of them (`io_context_options::threads`).
 
 ## DNS over TLS
 

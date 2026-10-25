@@ -9,9 +9,7 @@ set_target_properties(cares_asio_example_minimal PROPERTIES OUTPUT_NAME minimal)
 target_link_libraries(cares_asio_example_minimal PRIVATE cares_asio::cares_asio)
 
 #
-# The command line is written in ASIO idioms throughout -- a parallel group of lookups, a signal
-# set, ASIO's own resolver to compare against -- and is left out of a COROSIO build.
+# The command line builds on either runtime: what it needs of its event loop is in a header of
+# its own, one per runtime.
 #
-if (CARES_ASIO_ASIO)
-    add_subdirectory(resolve)
-endif()
+add_subdirectory(resolve)

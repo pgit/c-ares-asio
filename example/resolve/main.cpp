@@ -3,25 +3,12 @@
 
 //
 // Resolves the host names given on the command line, or those of the URLs listed in a file, using
-// c-ares driven by the ASIO event loop. With --asio, ASIO's own resolver (a getaddrinfo() call on
-// an internal thread) is used instead, which is the behaviour to compare against.
+// c-ares driven by the event loop of the runtime the library was built on. With --native, the
+// resolver of that runtime itself (a getaddrinfo() call on a thread of its own) is used instead,
+// which is the behaviour to compare against.
 //
+#include "runtime.hpp"
 #include "utils.hpp"
-
-#include <boost/asio/as_tuple.hpp>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/cancellation_state.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/deferred.hpp>
-#include <boost/asio/error.hpp>
-#include <boost/asio/experimental/parallel_group.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/signal_set.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
 
 #include <boost/program_options.hpp>
 
@@ -40,6 +27,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -51,13 +39,15 @@
 
 #include <unistd.h>
 
-using namespace boost::asio;
 namespace po = boost::program_options;
+
+using cares_asio::error_code;
+using cares_asio::Task;
 
 struct Config
 {
    bool verbose = false;
-   bool asio = false;
+   bool native = false;
    bool ordered = false;
    bool color = false;
    int concurrency = 10;
@@ -166,8 +156,7 @@ std::optional<ServerName> serverName(std::string_view server)
       return std::nullopt; // a bare IPv6 address, which has several colons and no port
 
    const auto name = server.substr(0, colon);
-   boost::system::error_code notAnAddress;
-   if (name.empty() || (ip::make_address(name, notAnAddress), !notAnAddress))
+   if (name.empty() || app::make_address(name))
       return std::nullopt;
 
    return ServerName{name, colon == std::string_view::npos ? "" : server.substr(colon)};
@@ -197,7 +186,8 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    auto opts = desc.add_options();
    opts("help,h", "produce help message");
    opts("verbose,v", po::bool_switch(&config.verbose), "enable verbose logging");
-   opts("asio,a", po::bool_switch(&config.asio), "use ASIO's own resolver instead of c-ares");
+   const auto native = std::format("use {} instead of c-ares", app::native_resolver::name);
+   opts("native", po::bool_switch(&config.native), native.c_str());
    opts("service,s", po::value(&config.service)->default_value(config.service),
         "service name or port number to resolve for");
    opts("server,n", po::value(&config.servers),
@@ -266,9 +256,11 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
 
    if (config.tls.enabled)
    {
-      if (config.asio)
+      if (config.native)
       {
-         std::cerr << "--dot is not supported by the ASIO resolver" << std::endl << desc;
+         std::cerr << std::format("--dot is not supported by {}", app::native_resolver::name)
+                   << std::endl
+                   << desc;
          return std::unexpected(EXIT_FAILURE);
       }
 
@@ -325,23 +317,23 @@ void logToSpdlog(cares_asio::log_level level, std::string_view message)
 }
 
 //
-// What came back for one name. The ASIO resolver has no way to ask for the HTTPS record, so that
-// half stays empty there.
+// What came back for one name. The resolver of the runtime has no way to ask for the HTTPS
+// record, so that half stays empty there.
 //
 struct Lookup
 {
-   boost::system::error_code ec;
+   error_code ec;
    cares_asio::resolver::results_type endpoints;
-   boost::system::error_code httpsEc;
+   error_code httpsEc;
    cares_asio::resolver::https_results_type records;
 };
 
-using LookupFunction = std::function<awaitable<Lookup>(const std::string& host)>;
+using LookupFunction = std::function<Task<Lookup>(const std::string& host)>;
 
 //
 // A name without an HTTPS record is the common case rather than a problem.
 //
-bool isNoRecord(const boost::system::error_code& ec)
+bool isNoRecord(const error_code& ec)
 {
    return ec == cares_asio::make_ares_error(ARES_ENODATA) ||
           ec == cares_asio::make_ares_error(ARES_ENOTFOUND);
@@ -370,7 +362,7 @@ std::string colored(std::string_view text, Color color)
 //
 // Padded to 'width' before the colour goes on, as the escape sequences would count towards it.
 //
-std::string toText(const ip::address& address, size_t width = 0)
+std::string toText(const cares_asio::IpAddress& address, size_t width = 0)
 {
    return colored(std::format("{:{}}", address.to_string(), width),
                   address.is_v4() ? Color::v4 : Color::v6);
@@ -464,7 +456,7 @@ void reportCompact(const std::string& host, const Lookup& lookup, size_t width)
 // time, and reports each one the moment its answer is in -- or, with --ordered, in the order they
 // were given.
 //
-awaitable<void> resolveAll(const Config& config, LookupFunction lookup)
+Task<void> resolveAll(const Config& config, LookupFunction lookup)
 {
    const auto& hosts = config.hosts;
    const auto width = std::ranges::max(hosts, {}, &std::string::size).size();
@@ -491,20 +483,19 @@ awaitable<void> resolveAll(const Config& config, LookupFunction lookup)
    // and comes back for more. All of them run on the one thread and only ever switch at a
    // co_await, so they can share the above without further ado.
    //
-   auto worker = [&]() -> awaitable<void> {
-      co_await this_coro::throw_if_cancelled(false);
-      const auto state = co_await this_coro::cancellation_state;
+   auto worker = [&]() -> Task<void> {
+      co_await app::observe_cancellation();
 
       //
-      // The cancellation state is what to ask, not the lookup's error: an answer that was already
-      // on its way when the signal came is a good one, and going by that alone the worker would
-      // start on the next name with nobody left to stop it.
+      // Whether the worker was cancelled is what to ask, not the lookup's error: an answer that
+      // was already on its way when the signal came is a good one, and going by that alone the
+      // worker would start on the next name with nobody left to stop it.
       //
-      while (next < hosts.size() && state.cancelled() == cancellation_type::none)
+      while (next < hosts.size() && !co_await app::cancelled())
       {
          const auto index = next++;
          auto result = co_await lookup(hosts[index]);
-         if (state.cancelled() != cancellation_type::none)
+         if (co_await app::cancelled())
             co_return;
 
          if (!config.ordered)
@@ -522,56 +513,47 @@ awaitable<void> resolveAll(const Config& config, LookupFunction lookup)
       }
    };
 
-   const auto executor = co_await this_coro::executor;
    const auto count = std::min<size_t>(config.concurrency, hosts.size());
    spdlog::debug("resolving {} name(s), {} at a time", hosts.size(), count);
 
-   std::vector<decltype(co_spawn(executor, worker(), deferred))> workers;
+   std::vector<Task<void>> workers;
+   workers.reserve(count);
    for (size_t i = 0; i < count; ++i)
-      workers.push_back(co_spawn(executor, worker(), deferred));
+      workers.push_back(worker());
 
-   auto [order, exceptions] = co_await experimental::make_parallel_group(std::move(workers))
-                                 .async_wait(experimental::wait_for_all(), use_awaitable);
-
-   for (const auto& exception : exceptions)
-      if (exception)
-         std::rethrow_exception(exception);
+   co_await app::when_all(std::move(workers));
 }
 
 // --------------------------------------------------------------------------------------------------
 
-awaitable<Lookup> lookupWithAsio(ip::tcp::resolver& resolver, const Config& config,
-                                 const std::string& host)
+Task<Lookup> lookupWithNative(app::native_resolver& resolver, const Config& config,
+                              const std::string& host)
 {
    spdlog::debug("resolving {}:{}...", host, config.service);
-   auto [ec, results] = co_await resolver.async_resolve(host, config.service, as_tuple);
+   auto [ec, endpoints] = co_await resolver.resolve(host, config.service);
 
-   Lookup lookup{.ec = ec};
-   for (const auto& result : results)
-      lookup.endpoints.push_back(result.endpoint());
-
-   co_return lookup;
+   co_return Lookup{.ec = ec, .endpoints = std::move(endpoints)};
 }
 
-awaitable<void> resolveWithAsio(const Config& config)
+Task<void> resolveWithNative(const cares_asio::Executor& executor, const Config& config)
 {
-   co_await this_coro::throw_if_cancelled(false);
+   co_await app::observe_cancellation();
 
    if (!config.servers.empty())
-      spdlog::warn("--server is not supported by the ASIO resolver, ignoring it");
+      spdlog::warn("--server is not supported by {}, ignoring it", app::native_resolver::name);
 
    //
-   // getaddrinfo() answers with addresses and nothing else, so this path is addresses only. It
-   // also blocks, and ASIO has a single thread to call it on unless configured otherwise, so
-   // however many lookups are handed over at once, they are still answered one after the other.
+   // getaddrinfo() answers with addresses and nothing else, so this path is addresses only -- and
+   // it blocks, so what the runtime has to call it on decides how many lookups it really has in
+   // flight at a time.
    //
-   spdlog::debug("the ASIO resolver cannot look up HTTPS records");
+   spdlog::debug("{} cannot look up HTTPS records", app::native_resolver::name);
    if (config.concurrency > 1)
-      spdlog::debug("the ASIO resolver works through its lookups one at a time");
+      spdlog::debug("{}", app::native_resolver::concurrency_note);
 
-   ip::tcp::resolver resolver(co_await this_coro::executor);
+   app::native_resolver resolver(executor);
    co_await resolveAll(
-      config, [&](const std::string& host) { return lookupWithAsio(resolver, config, host); });
+      config, [&](const std::string& host) { return lookupWithNative(resolver, config, host); });
 }
 
 //
@@ -580,8 +562,8 @@ awaitable<void> resolveWithAsio(const Config& config)
 // keeping several queries in flight on a channel, and with --dot they share the connection as
 // well as the round trip.
 //
-awaitable<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config,
-                                 const std::string& host)
+Task<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config,
+                            const std::string& host)
 {
    spdlog::debug("resolving {}:{}...", host, config.service);
 
@@ -589,17 +571,36 @@ awaitable<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& c
    // An address is no name to hang a record on, so there is only one question to ask -- and
    // c-ares answers that one without a query. A list of URLs has such hosts in it sooner or later.
    //
-   if (boost::system::error_code notAnAddress; ip::make_address(host, notAnAddress), !notAnAddress)
+   if (app::make_address(host))
    {
-      auto [ec, endpoints] = co_await resolver.async_resolve(host, config.service, as_tuple);
+      auto [ec, endpoints] = co_await resolver.resolve(host, config.service);
       co_return Lookup{.ec = ec, .endpoints = std::move(endpoints)};
    }
 
-   auto [order, ec, endpoints, httpsEc, records] =
-      co_await experimental::make_parallel_group(
-         resolver.async_resolve(host, config.service, deferred),
-         resolver.async_resolve_https(host, deferred))
-         .async_wait(experimental::wait_for_all(), use_awaitable);
+   //
+   // Both questions go out together rather than one after the other: c-ares has no trouble
+   // keeping several queries in flight on a channel, and with --dot they share the connection as
+   // well as the round trip.
+   //
+   // Each of them leaves its own answer behind, which is also what keeps them apart: a composite
+   // operation that gives up on the first error would have the missing HTTPS record of a name --
+   // the common case -- cut the addresses short.
+   //
+   Lookup lookup;
+
+   std::vector<Task<void>> questions;
+   questions.push_back([](cares_asio::resolver& resolver, std::string host, std::string service,
+                          Lookup& lookup) -> Task<void> {
+      std::tie(lookup.ec, lookup.endpoints) =
+         co_await resolver.resolve(std::move(host), std::move(service));
+   }(resolver, host, config.service, lookup));
+
+   questions.push_back([](cares_asio::resolver& resolver, std::string host,
+                          Lookup& lookup) -> Task<void> {
+      std::tie(lookup.httpsEc, lookup.records) = co_await resolver.resolve_https(std::move(host));
+   }(resolver, host, lookup));
+
+   co_await app::when_all(std::move(questions));
 
    //
    // A name that cannot be encoded as a DNS name at all is no question for any record type, and
@@ -607,16 +608,16 @@ awaitable<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& c
    // ARES_EBADNAME, ares_search_dnsrec() says ARES_ENOMEM (c-ares 1.34.5), so the address error
    // is the one to believe and repeating it as a memory problem would only mislead.
    //
-   if (ec == cares_asio::make_ares_error(ARES_EBADNAME))
-      httpsEc = {};
+   if (lookup.ec == cares_asio::make_ares_error(ARES_EBADNAME))
+      lookup.httpsEc = {};
 
    //
    // The records of a set come in no particular order, and not in the same one twice. By priority
    // is the order a client goes through them in, and it puts the alias form first.
    //
-   std::ranges::stable_sort(records, {}, &cares_asio::https_record::priority);
+   std::ranges::stable_sort(lookup.records, {}, &cares_asio::https_record::priority);
 
-   co_return Lookup{ec, std::move(endpoints), httpsEc, std::move(records)};
+   co_return lookup;
 }
 
 //
@@ -625,9 +626,14 @@ awaitable<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& c
 // in the clear, whatever the queries proper are meant to go out as. Returns nothing if a name
 // cannot be looked up, having said why.
 //
-awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
+Task<std::optional<std::string>> lookupServers(const cares_asio::Executor& executor,
+                                               std::string_view servers)
 {
-   std::optional<cares_asio::resolver> resolver; // only if there is a name to look up at all
+   //
+   // Only if there is a name to look up at all. By pointer rather than in a std::optional, which
+   // one of the runtimes does not take a resolver in -- see doc/corosio.md.
+   //
+   std::unique_ptr<cares_asio::resolver> resolver;
    std::string addresses;
 
    for (const auto server : serversOf(servers))
@@ -646,15 +652,15 @@ awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
 
       if (!resolver)
       {
-         resolver.emplace(co_await this_coro::executor);
+         resolver = std::make_unique<cares_asio::resolver>(executor);
          resolver->set_logger(&logToSpdlog);
       }
 
       spdlog::debug("looking up DNS server {}...", named->name);
-      const auto [ec, endpoints] = co_await resolver->async_resolve(named->name, "", as_tuple);
+      const auto [ec, endpoints] = co_await resolver->resolve(std::string(named->name), "");
       if (ec || endpoints.empty())
       {
-         if (ec != error::operation_aborted)
+         if (ec != cares_asio::errors::canceled)
             spdlog::error("--server {}: {}", named->name,
                           ec ? ec.message() : cares_asio::make_ares_error(ARES_ENODATA).message());
          co_return std::nullopt;
@@ -679,15 +685,15 @@ awaitable<std::optional<std::string>> lookupServers(std::string_view servers)
    co_return addresses;
 }
 
-awaitable<void> resolveWithAres(const Config& config)
+Task<void> resolveWithAres(const cares_asio::Executor& executor, const Config& config)
 {
-   co_await this_coro::throw_if_cancelled(false);
+   co_await app::observe_cancellation();
 
-   const auto servers = co_await lookupServers(config.servers);
+   const auto servers = co_await lookupServers(executor, config.servers);
    if (!servers)
       co_return;
 
-   cares_asio::resolver resolver(co_await this_coro::executor, config.tls);
+   cares_asio::resolver resolver(executor, config.tls);
    resolver.set_logger(&logToSpdlog);
    if (auto ec = resolver.set_servers(*servers))
    {
@@ -715,33 +721,17 @@ int main(int argc, char* argv[])
    spdlog::set_pattern("%H:%M:%S.%e %^%l%$ %v");
    spdlog::set_level(config->verbose ? spdlog::level::debug : spdlog::level::info);
 
-   io_context context;
+   app::Context context;
+   const auto executor = app::executor_of(context);
 
    //
-   // Cancel the lookup instead of stopping the io_context, so that everything gets a chance to
-   // unwind -- the pending request belongs to c-ares, the io_context knows nothing about it.
+   // Ctrl-C cancels the lookups instead of stopping the event loop, so that everything gets a
+   // chance to unwind -- the pending request belongs to c-ares, the loop knows nothing about it.
    //
-   cancellation_signal cancellation;
-
-   signal_set signals(context, SIGINT, SIGTERM);
-   signals.async_wait([&](const boost::system::error_code& ec, int signal) {
-      if (ec)
-         return;
-      spdlog::warn("received signal {}, stopping...", signal);
-      cancellation.emit(cancellation_type::all);
-   });
-
-   co_spawn(context, config->asio ? resolveWithAsio(*config) : resolveWithAres(*config),
-            bind_cancellation_slot(cancellation.slot(), [&](std::exception_ptr ep) {
-               signals.cancel();
-               if (ep)
-                  std::rethrow_exception(ep);
-            }));
-
-   if (config->verbose)
-      run(context); // one line per completion handler, with timing
-   else
-      context.run();
+   app::run_main(context,
+                 config->native ? resolveWithNative(executor, *config)
+                                : resolveWithAres(executor, *config),
+                 config->verbose);
 
    return EXIT_SUCCESS;
 }

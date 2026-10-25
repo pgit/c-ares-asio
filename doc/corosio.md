@@ -49,6 +49,14 @@ or `CARES_ASIO_COROSIO` (exactly one of which is 1, from the generated `cares_as
 | [`src/event_loop.hpp`](../src/event_loop.hpp) | the event loop the implementation drives: `Descriptor`, `Timer`, `make_endpoint()`, again one file per runtime |
 | [`include/cares_asio/resolver.hpp`](../include/cares_asio/resolver.hpp) | the front end: the completion-token operations are ASIO-only |
 
+The `resolve` example has a small layer of the same kind for what a program needs beyond the
+library -- the event loop itself, the signal handling, the workers of `--concurrency`, the
+resolver of the runtime that `--native` compares against:
+[`example/resolve/runtime.hpp`](../example/resolve/runtime.hpp), again one file per runtime, with
+one `main.cpp` on top of either. The minimal example, which is there to be read rather than used,
+has a version per runtime instead: [`example/asio/minimal.cpp`](../example/asio/minimal.cpp) and
+[`example/corosio/minimal.cpp`](../example/corosio/minimal.cpp).
+
 Everything else -- the lookups, the HTTPS records, the server lists, the DNS over TLS transport --
 is written once, against those names. `asio/runtime.hpp` documents each of them and
 `corosio/runtime.hpp` has the same definitions in the same order, so the pair can be read side by
@@ -122,10 +130,6 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
 
 ## Not done yet
 
-* The `resolve` example is ASIO-only: it is written in ASIO idioms throughout (a parallel group of
-  lookups, a signal set, ASIO's own resolver to compare against). The minimal example has a
-  version for each runtime, in [`example/asio`](../example/asio) and
-  [`example/corosio`](../example/corosio).
 * Threads. A resolver is for one thread at a time in either runtime, and where the ASIO build has
   a strand test (`async_test.cpp`), the COROSIO one has none: `capy::strand` exists and corosio
   resumes a coroutine through the executor of its `io_env`, so a resolver on a strand should stay
