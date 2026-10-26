@@ -3,8 +3,8 @@
 
 //
 // The I/O runtime the library is built on, and the vocabulary its interface is written in:
-// Boost.Asio with completion tokens (CARES_ASIO_ASIO=1), or capy/corosio with coroutines only
-// (CARES_ASIO_COROSIO=1). A build tree is one or the other, see doc/corosio.md.
+// Boost.Asio with completion tokens (CARES_ASYNC_ASIO=1), or capy/corosio with coroutines only
+// (CARES_ASYNC_COROSIO=1). A build tree is one or the other, see doc/corosio.md.
 //
 //    Task<T>, Executor, error_code, error_category, system_error  -- what the runtime calls things
 //    IpAddress, Endpoint                                          -- the runtime's own
@@ -17,14 +17,14 @@
 //
 #pragma once
 
-#include <cares_asio/config.hpp>
+#include <cares_async/config.hpp>
 
-#if CARES_ASIO_ASIO == CARES_ASIO_COROSIO
-#error "exactly one of CARES_ASIO_ASIO and CARES_ASIO_COROSIO has to be 1"
+#if CARES_ASYNC_ASIO == CARES_ASYNC_COROSIO
+#error "exactly one of CARES_ASYNC_ASIO and CARES_ASYNC_COROSIO has to be 1"
 #endif
 
-#if CARES_ASIO_COROSIO
-#include <cares_asio/corosio/runtime.hpp>
+#if CARES_ASYNC_COROSIO
+#include <cares_async/corosio/runtime.hpp>
 #else
-#include <cares_asio/asio/runtime.hpp>
+#include <cares_async/asio/runtime.hpp>
 #endif

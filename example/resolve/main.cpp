@@ -15,7 +15,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include <cares_asio/resolver.hpp>
+#include <cares_async/resolver.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -41,8 +41,8 @@
 
 namespace po = boost::program_options;
 
-using cares_asio::error_code;
-using cares_asio::Task;
+using cares_async::error_code;
+using cares_async::Task;
 
 struct Config
 {
@@ -55,7 +55,7 @@ struct Config
    std::string servers;
    std::string file; // where the URLs came from, which also asks for the one-line-per-host listing
    std::vector<std::string> hosts;
-   cares_asio::tls_options tls;
+   cares_async::tls_options tls;
 };
 
 //
@@ -301,17 +301,17 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
 //
 // The library does not log by itself, it only says what there is to log.
 //
-void logToSpdlog(cares_asio::log_level level, std::string_view message)
+void logToSpdlog(cares_async::log_level level, std::string_view message)
 {
    switch (level)
    {
-   case cares_asio::log_level::debug:
+   case cares_async::log_level::debug:
       return spdlog::debug("{}", message);
-   case cares_asio::log_level::info:
+   case cares_async::log_level::info:
       return spdlog::info("{}", message);
-   case cares_asio::log_level::warning:
+   case cares_async::log_level::warning:
       return spdlog::warn("{}", message);
-   case cares_asio::log_level::error:
+   case cares_async::log_level::error:
       return spdlog::error("{}", message);
    }
 }
@@ -323,9 +323,9 @@ void logToSpdlog(cares_asio::log_level level, std::string_view message)
 struct Lookup
 {
    error_code ec;
-   cares_asio::resolver::results_type endpoints;
+   cares_async::resolver::results_type endpoints;
    error_code httpsEc;
-   cares_asio::resolver::https_results_type records;
+   cares_async::resolver::https_results_type records;
 };
 
 using LookupFunction = std::function<Task<Lookup>(const std::string& host)>;
@@ -335,8 +335,8 @@ using LookupFunction = std::function<Task<Lookup>(const std::string& host)>;
 //
 bool isNoRecord(const error_code& ec)
 {
-   return ec == cares_asio::make_ares_error(ARES_ENODATA) ||
-          ec == cares_asio::make_ares_error(ARES_ENOTFOUND);
+   return ec == cares_async::make_ares_error(ARES_ENODATA) ||
+          ec == cares_async::make_ares_error(ARES_ENOTFOUND);
 }
 
 //
@@ -362,13 +362,13 @@ std::string colored(std::string_view text, Color color)
 //
 // Padded to 'width' before the colour goes on, as the escape sequences would count towards it.
 //
-std::string toText(const cares_asio::IpAddress& address, size_t width = 0)
+std::string toText(const cares_async::IpAddress& address, size_t width = 0)
 {
    return colored(std::format("{:{}}", address.to_string(), width),
                   address.is_v4() ? Color::v4 : Color::v6);
 }
 
-std::string toText(const cares_asio::https_record& record)
+std::string toText(const cares_async::https_record& record)
 {
    //
    // An empty target is the record's own name, which is a bare dot in presentation form.
@@ -535,7 +535,7 @@ Task<Lookup> lookupWithNative(app::native_resolver& resolver, const Config& conf
    co_return Lookup{.ec = ec, .endpoints = std::move(endpoints)};
 }
 
-Task<void> resolveWithNative(const cares_asio::Executor& executor, const Config& config)
+Task<void> resolveWithNative(const cares_async::Executor& executor, const Config& config)
 {
    co_await app::observe_cancellation();
 
@@ -562,7 +562,7 @@ Task<void> resolveWithNative(const cares_asio::Executor& executor, const Config&
 // keeping several queries in flight on a channel, and with --dot they share the connection as
 // well as the round trip.
 //
-Task<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config,
+Task<Lookup> lookupWithAres(cares_async::resolver& resolver, const Config& config,
                             const std::string& host)
 {
    spdlog::debug("resolving {}:{}...", host, config.service);
@@ -589,13 +589,13 @@ Task<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config
    Lookup lookup;
 
    std::vector<Task<void>> questions;
-   questions.push_back([](cares_asio::resolver& resolver, std::string host, std::string service,
+   questions.push_back([](cares_async::resolver& resolver, std::string host, std::string service,
                           Lookup& lookup) -> Task<void> {
       std::tie(lookup.ec, lookup.endpoints) =
          co_await resolver.resolve(std::move(host), std::move(service));
    }(resolver, host, config.service, lookup));
 
-   questions.push_back([](cares_asio::resolver& resolver, std::string host,
+   questions.push_back([](cares_async::resolver& resolver, std::string host,
                           Lookup& lookup) -> Task<void> {
       std::tie(lookup.httpsEc, lookup.records) = co_await resolver.resolve_https(std::move(host));
    }(resolver, host, lookup));
@@ -608,14 +608,14 @@ Task<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config
    // ARES_EBADNAME, ares_search_dnsrec() says ARES_ENOMEM (c-ares 1.34.5), so the address error
    // is the one to believe and repeating it as a memory problem would only mislead.
    //
-   if (lookup.ec == cares_asio::make_ares_error(ARES_EBADNAME))
+   if (lookup.ec == cares_async::make_ares_error(ARES_EBADNAME))
       lookup.httpsEc = {};
 
    //
    // The records of a set come in no particular order, and not in the same one twice. By priority
    // is the order a client goes through them in, and it puts the alias form first.
    //
-   std::ranges::stable_sort(lookup.records, {}, &cares_asio::https_record::priority);
+   std::ranges::stable_sort(lookup.records, {}, &cares_async::https_record::priority);
 
    co_return lookup;
 }
@@ -626,14 +626,14 @@ Task<Lookup> lookupWithAres(cares_asio::resolver& resolver, const Config& config
 // in the clear, whatever the queries proper are meant to go out as. Returns nothing if a name
 // cannot be looked up, having said why.
 //
-Task<std::optional<std::string>> lookupServers(const cares_asio::Executor& executor,
+Task<std::optional<std::string>> lookupServers(const cares_async::Executor& executor,
                                                std::string_view servers)
 {
    //
    // Only if there is a name to look up at all. By pointer rather than in a std::optional, which
    // one of the runtimes does not take a resolver in -- see doc/corosio.md.
    //
-   std::unique_ptr<cares_asio::resolver> resolver;
+   std::unique_ptr<cares_async::resolver> resolver;
    std::string addresses;
 
    for (const auto server : serversOf(servers))
@@ -652,7 +652,7 @@ Task<std::optional<std::string>> lookupServers(const cares_asio::Executor& execu
 
       if (!resolver)
       {
-         resolver = std::make_unique<cares_asio::resolver>(executor);
+         resolver = std::make_unique<cares_async::resolver>(executor);
          resolver->set_logger(&logToSpdlog);
       }
 
@@ -660,9 +660,9 @@ Task<std::optional<std::string>> lookupServers(const cares_asio::Executor& execu
       const auto [ec, endpoints] = co_await resolver->resolve(std::string(named->name), "");
       if (ec || endpoints.empty())
       {
-         if (ec != cares_asio::errors::canceled)
+         if (ec != cares_async::errors::canceled)
             spdlog::error("--server {}: {}", named->name,
-                          ec ? ec.message() : cares_asio::make_ares_error(ARES_ENODATA).message());
+                          ec ? ec.message() : cares_async::make_ares_error(ARES_ENODATA).message());
          co_return std::nullopt;
       }
 
@@ -685,7 +685,7 @@ Task<std::optional<std::string>> lookupServers(const cares_asio::Executor& execu
    co_return addresses;
 }
 
-Task<void> resolveWithAres(const cares_asio::Executor& executor, const Config& config)
+Task<void> resolveWithAres(const cares_async::Executor& executor, const Config& config)
 {
    co_await app::observe_cancellation();
 
@@ -693,7 +693,7 @@ Task<void> resolveWithAres(const cares_asio::Executor& executor, const Config& c
    if (!servers)
       co_return;
 
-   cares_asio::resolver resolver(executor, config.tls);
+   cares_async::resolver resolver(executor, config.tls);
    resolver.set_logger(&logToSpdlog);
    if (auto ec = resolver.set_servers(*servers))
    {

@@ -1,6 +1,6 @@
 #
 # The library the way a consumer gets it: test/cmake_test is a project of its own that is
-# configured, built and run from scratch, once against an installed cares_asio that it finds with
+# configured, built and run from scratch, once against an installed cares_async that it finds with
 # find_package() and once with the sources pulled in through add_subdirectory(). Neither sees
 # anything of this build but what a consumer would.
 #
@@ -24,7 +24,7 @@ foreach (variable IN ITEMS
          CMAKE_PREFIX_PATH
          CMAKE_TOOLCHAIN_FILE
          BUILD_SHARED_LIBS
-         CARES_ASIO_TLS
+         CARES_ASYNC_TLS
          Boost_DIR
          c-ares_DIR
          OPENSSL_ROOT_DIR
@@ -40,7 +40,7 @@ file(GENERATE OUTPUT "${cmake_test_cache}" CONTENT "${cmake_test_cache_content}"
 add_test(NAME cmake_test.install
          COMMAND "${CMAKE_COMMAND}" --install "${PROJECT_BINARY_DIR}" --prefix
                  "${cmake_test_prefix}" --config $<CONFIG>)
-set_tests_properties(cmake_test.install PROPERTIES FIXTURES_SETUP cares_asio_installed)
+set_tests_properties(cmake_test.install PROPERTIES FIXTURES_SETUP cares_async_installed)
 
 foreach (how IN ITEMS find_package add_subdirectory)
     add_test(
@@ -48,11 +48,11 @@ foreach (how IN ITEMS find_package add_subdirectory)
         COMMAND
             "${CMAKE_CTEST_COMMAND}" --build-and-test "${cmake_test_source_dir}"
             "${cmake_test_binary_dir}/${how}" --build-generator "${CMAKE_GENERATOR}"
-            --build-options -C "${cmake_test_cache}" "-DCARES_ASIO_CONSUME=${how}"
-            "-Dcares_asio_ROOT=${cmake_test_prefix}" --test-command "${CMAKE_CTEST_COMMAND}"
+            --build-options -C "${cmake_test_cache}" "-DCARES_ASYNC_CONSUME=${how}"
+            "-Dcares_async_ROOT=${cmake_test_prefix}" --test-command "${CMAKE_CTEST_COMMAND}"
             --output-on-failure)
     set_tests_properties(cmake_test.${how} PROPERTIES LABELS cmake TIMEOUT 600)
 endforeach()
 
 set_tests_properties(cmake_test.install PROPERTIES LABELS cmake)
-set_tests_properties(cmake_test.find_package PROPERTIES FIXTURES_REQUIRED cares_asio_installed)
+set_tests_properties(cmake_test.find_package PROPERTIES FIXTURES_REQUIRED cares_async_installed)

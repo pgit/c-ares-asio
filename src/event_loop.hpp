@@ -3,7 +3,7 @@
 
 //
 // The event loop itself, as the implementation reaches it -- what the public runtime layer
-// (cares_asio/runtime.hpp) does not need to show anybody:
+// (cares_async/runtime.hpp) does not need to show anybody:
 //
 //    wait_type, Descriptor   -- readiness on a descriptor of c-ares', which it keeps owning
 //    Timer                   -- the one timer that ares_timeout() asks for
@@ -14,9 +14,9 @@
 //
 #pragma once
 
-#include <cares_asio/runtime.hpp>
+#include <cares_async/runtime.hpp>
 
-#if CARES_ASIO_COROSIO
+#if CARES_ASYNC_COROSIO
 #include "corosio/event_loop.hpp"
 #else
 #include "asio/event_loop.hpp"

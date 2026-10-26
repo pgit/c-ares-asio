@@ -3,7 +3,7 @@
 
 //
 // The runtime layer for Boost.Asio: completion tokens, asio::awaitable, any_io_executor. See
-// cares_asio/runtime.hpp for what this is, and corosio/runtime.hpp for the other runtime, which
+// cares_async/runtime.hpp for what this is, and corosio/runtime.hpp for the other runtime, which
 // defines the same names in the same order.
 //
 #pragma once
@@ -27,7 +27,7 @@
 
 #include <utility>
 
-namespace cares_asio
+namespace cares_async
 {
 
 /** A coroutine, as the runtime runs it: `boost::asio::awaitable<T>`.
@@ -168,4 +168,4 @@ auto initiate(Init&& init)
 
 } // namespace detail
 
-} // namespace cares_asio
+} // namespace cares_async

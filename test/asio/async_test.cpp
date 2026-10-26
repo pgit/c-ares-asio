@@ -27,12 +27,12 @@
 
 using namespace boost::asio;
 using boost::system::error_code;
-using cares_asio::make_ares_error;
+using cares_async::make_ares_error;
 using testing::ElementsAre;
 using testing::IsEmpty;
 
-using results_type = cares_asio::resolver::results_type;
-using https_results_type = cares_asio::resolver::https_results_type;
+using results_type = cares_async::resolver::results_type;
+using https_results_type = cares_async::resolver::https_results_type;
 
 class Async : public resolver_fixture
 {
@@ -180,7 +180,7 @@ TEST_F(Async, KeepsTheContextRunningUntilItIsDone)
    // answer is in, and must return once it is.
    //
    io_context other;
-   cares_asio::resolver lone(other.get_executor());
+   cares_async::resolver lone(other.get_executor());
 
    std::optional<error_code> result;
    lone.async_resolve("192.0.2.7", "443", [&](error_code ec, const results_type&) { result = ec; });
@@ -205,7 +205,7 @@ TEST(Strand, ServesAContextThatRunsOnSeveralThreads)
       server.add_address(std::format("host{}.example.test", i), std::format("192.0.2.{}", i));
 
    const auto strand = make_strand(context);
-   std::optional<cares_asio::resolver> resolver(std::in_place, strand);
+   std::optional<cares_async::resolver> resolver(std::in_place, strand);
    ASSERT_FALSE(resolver->set_servers(server.address()));
 
    const auto lookups = [&]() -> awaitable<int> {
@@ -361,7 +361,7 @@ TEST_F(Cancellation, IsNothingOnceTheResolverIsGone)
    cancellation_signal answered, failed, pending;
    int completed = 0;
    {
-      auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+      auto doomed = std::make_unique<cares_async::resolver>(context.get_executor());
       ASSERT_FALSE(doomed->set_servers(server.address()));
 
       doomed->async_resolve(
@@ -400,7 +400,7 @@ TEST_F(Lifetime, CompletesWhatIsPendingWhenTheResolverGoes)
 
    std::optional<error_code> result, https_result;
    {
-      cares_asio::resolver doomed(context.get_executor());
+      cares_async::resolver doomed(context.get_executor());
       ASSERT_FALSE(doomed.set_servers(server.address()));
 
       doomed.async_resolve("www.example.test", "443",
@@ -430,7 +430,7 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
 
    std::optional<error_code> result;
    {
-      cares_asio::resolver doomed(other.get_executor());
+      cares_async::resolver doomed(other.get_executor());
       ASSERT_FALSE(doomed.set_servers(silent.address()));
       doomed.async_resolve("www.example.test", "443",
                            [&](error_code ec, const results_type&) { result = ec; });
@@ -455,7 +455,7 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
    // memory that was given back.
    //
    ASSERT_EQ(::setenv("RES_OPTIONS", "timeout:1 attempts:1", 1), 0);
-   auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+   auto doomed = std::make_unique<cares_async::resolver>(context.get_executor());
    ASSERT_EQ(::unsetenv("RES_OPTIONS"), 0);
 
    ASSERT_FALSE(doomed->set_servers(server.address()));
@@ -479,6 +479,6 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
 
 TEST_F(Lifetime, CanGoWithNothingEverAsked)
 {
-   cares_asio::resolver unused(context.get_executor());
+   cares_async::resolver unused(context.get_executor());
    context.poll();
 }

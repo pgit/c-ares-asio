@@ -6,7 +6,7 @@
 //
 #pragma once
 
-#include <cares_asio/runtime.hpp>
+#include <cares_async/runtime.hpp>
 
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -22,7 +22,7 @@
 #include <string>
 #include <utility>
 
-namespace cares_asio::detail
+namespace cares_async::detail
 {
 
 //
@@ -172,4 +172,4 @@ inline std::optional<Endpoint> make_endpoint(const sockaddr* address, std::size_
    return std::nullopt;
 }
 
-} // namespace cares_asio::detail
+} // namespace cares_async::detail

@@ -63,6 +63,6 @@ of it spent waiting for a handful of them.
 
 ## Which TLS library
 
-`-DCARES_ASIO_TLS=OpenSSL` (the default) or `-DCARES_ASIO_TLS=AWS-LC`, with `-Dssl_ROOT=` saying
+`-DCARES_ASYNC_TLS=OpenSSL` (the default) or `-DCARES_ASYNC_TLS=AWS-LC`, with `-Dssl_ROOT=` saying
 where the latter is installed. The transport uses nothing beyond the OpenSSL API that AWS-LC
 implements too, so the switch is a link-time one: no source file knows which of the two it got.

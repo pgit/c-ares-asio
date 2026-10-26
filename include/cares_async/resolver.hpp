@@ -12,9 +12,9 @@
 //
 #pragma once
 
-#include <cares_asio/error.hpp>
-#include <cares_asio/export.hpp>
-#include <cares_asio/runtime.hpp>
+#include <cares_async/error.hpp>
+#include <cares_async/export.hpp>
+#include <cares_async/runtime.hpp>
 
 #include <ares.h>
 
@@ -26,11 +26,11 @@
 #include <tuple>
 #include <vector>
 
-#if CARES_ASIO_ASIO
+#if CARES_ASYNC_ASIO
 #include <boost/asio/async_result.hpp>
 #endif
 
-namespace cares_asio
+namespace cares_async
 {
 
 namespace detail
@@ -155,8 +155,8 @@ using log_function = std::function<void(log_level, std::string_view)>;
 
     @par The two runtimes
     Both lookups come as a coroutine, @ref resolve and @ref resolve_https,
-    which is the spelling that an `CARES_ASIO_ASIO` and an
-    `CARES_ASIO_COROSIO` build have in common: it yields the error and the
+    which is the spelling that an `CARES_ASYNC_ASIO` and an
+    `CARES_ASYNC_COROSIO` build have in common: it yields the error and the
     result as a tuple. On Boost.Asio there is also @ref async_resolve and
     @ref async_resolve_https, which take any completion token. See
     `doc/corosio.md`.
@@ -183,7 +183,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
     @code
     boost::asio::awaitable<void> lookup(std::string host)
     {
-       cares_asio::resolver resolver(co_await boost::asio::this_coro::executor);
+       cares_async::resolver resolver(co_await boost::asio::this_coro::executor);
 
        for (const auto& endpoint :
             co_await resolver.async_resolve(host, "443", boost::asio::use_awaitable))
@@ -195,9 +195,9 @@ using log_function = std::function<void(log_level, std::string_view)>;
     exception:
 
     @code
-    cares_asio::Task<void> lookup(cares_asio::Executor executor, std::string host)
+    cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
     {
-       cares_asio::resolver resolver(executor);
+       cares_async::resolver resolver(executor);
 
        auto [ec, endpoints] = co_await resolver.resolve(host, "443");
        for (const auto& endpoint : endpoints)
@@ -205,7 +205,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
     }
     @endcode
  */
-class CARES_ASIO_EXPORT resolver
+class CARES_ASYNC_EXPORT resolver
 {
 public:
    /** The type of the executor that a resolver runs on. */
@@ -341,7 +341,7 @@ public:
     */
    Task<std::tuple<error_code, https_results_type>> resolve_https(std::string host);
 
-#if CARES_ASIO_ASIO
+#if CARES_ASYNC_ASIO
 
    /** A completion handler of @ref async_resolve, whatever its type. */
    using resolve_handler = detail::Completion<resolve_signature>;
@@ -415,7 +415,7 @@ public:
          token, std::string(host));
    }
 
-#endif // CARES_ASIO_ASIO
+#endif // CARES_ASYNC_ASIO
 
 private:
    struct socket_watch;
@@ -441,4 +441,4 @@ private:
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 
-} // namespace cares_asio
+} // namespace cares_async

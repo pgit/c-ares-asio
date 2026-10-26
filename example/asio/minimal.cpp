@@ -7,7 +7,7 @@
 //
 //    minimal [host]
 //
-#include <cares_asio.hpp>
+#include <cares_async.hpp>
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -24,7 +24,7 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> lookup(std::string host)
 {
-   cares_asio::resolver resolver(co_await asio::this_coro::executor);
+   cares_async::resolver resolver(co_await asio::this_coro::executor);
 
    const auto [ec, endpoints] =
       co_await resolver.async_resolve(host, "443", asio::as_tuple(asio::use_awaitable));
@@ -41,7 +41,7 @@ asio::awaitable<void> lookup(std::string host)
    const auto [https_ec, records] =
       co_await resolver.async_resolve_https(host, asio::as_tuple(asio::use_awaitable));
 
-   if (https_ec && https_ec != cares_asio::make_ares_error(ARES_ENODATA))
+   if (https_ec && https_ec != cares_async::make_ares_error(ARES_ENODATA))
       std::cerr << host << ": HTTPS: " << https_ec.message() << '\n';
 
    for (const auto& record : records)

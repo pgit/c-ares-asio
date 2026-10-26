@@ -9,7 +9,7 @@
 
 #include "run.hpp"
 
-#include <cares_asio/runtime.hpp>
+#include <cares_async/runtime.hpp>
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -29,7 +29,7 @@ protected:
    //
    // What the resolver under test runs on.
    //
-   cares_asio::Executor executor() { return context.get_executor(); }
+   cares_async::Executor executor() { return context.get_executor(); }
 
    //
    // What the fake DNS server runs on, which is Boost.Asio on either runtime. Here it is the one
@@ -41,7 +41,7 @@ protected:
    // Runs the loop until 'task' is through, and returns what it returned.
    //
    template <typename T>
-   T run(cares_asio::Task<T> task)
+   T run(cares_async::Task<T> task)
    {
       return ::run(context, std::move(task));
    }
@@ -49,7 +49,7 @@ protected:
    //
    // Starts 'task' and comes back: for the tests that want more than one thing in flight.
    //
-   void start(cares_asio::Task<void> task)
+   void start(cares_async::Task<void> task)
    {
       boost::asio::co_spawn(context, std::move(task), boost::asio::detached);
    }
@@ -64,7 +64,7 @@ protected:
       return ::run_until(context, std::move(done), limit);
    }
 
-   static cares_asio::Endpoint endpoint(std::string_view address, unsigned short port)
+   static cares_async::Endpoint endpoint(std::string_view address, unsigned short port)
    {
       return {boost::asio::ip::make_address(address), port};
    }

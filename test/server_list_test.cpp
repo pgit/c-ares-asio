@@ -13,8 +13,8 @@
 #include <memory>
 #include <string>
 
-using cares_asio::detail::set_port;
-using cares_asio::detail::with_port;
+using cares_async::detail::set_port;
+using cares_async::detail::with_port;
 
 TEST(ServerList, AddsThePortWhereThereIsNone)
 {

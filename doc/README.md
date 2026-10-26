@@ -3,8 +3,8 @@
 ## Reference
 
 The reference is made by [MrDocs](https://www.mrdocs.com) from the comments in the public headers,
-[`include/cares_asio/resolver.hpp`](../include/cares_asio/resolver.hpp) and
-[`include/cares_asio/error.hpp`](../include/cares_asio/error.hpp), as HTML with a page per symbol:
+[`include/cares_async/resolver.hpp`](../include/cares_async/resolver.hpp) and
+[`include/cares_async/error.hpp`](../include/cares_async/error.hpp), as HTML with a page per symbol:
 
 ```sh
 cmake --preset dev -DMRDOCS_EXECUTABLE=/path/to/mrdocs

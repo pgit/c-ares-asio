@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include <cares_asio/error.hpp>
+#include <cares_async/error.hpp>
 
 #include <ares.h>
 
@@ -9,9 +9,9 @@
 
 #include <system_error>
 
-using cares_asio::ares_category;
-using cares_asio::make_ares_error;
-using cares_asio::make_system_error;
+using cares_async::ares_category;
+using cares_async::make_ares_error;
+using cares_async::make_system_error;
 
 TEST(Error, CategoryHasAName) { EXPECT_STREQ(ares_category().name(), "c-ares"); }
 
@@ -52,6 +52,6 @@ TEST(Error, IsNoSystemError)
 
 TEST(Error, TravelsInAnException)
 {
-   const cares_asio::system_error error(make_ares_error(ARES_ESERVFAIL), "lookup");
+   const cares_async::system_error error(make_ares_error(ARES_ESERVFAIL), "lookup");
    EXPECT_EQ(error.code(), make_ares_error(ARES_ESERVFAIL));
 }

@@ -13,7 +13,7 @@
 //
 #pragma once
 
-#include <cares_asio/runtime.hpp>
+#include <cares_async/runtime.hpp>
 
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/corosio/io_context.hpp>
@@ -64,12 +64,12 @@ protected:
          ;
    }
 
-   cares_asio::Executor executor() { return cares_asio::Executor(context.get_executor()); }
+   cares_async::Executor executor() { return cares_async::Executor(context.get_executor()); }
 
    boost::asio::any_io_executor server_executor() { return server_context.get_executor(); }
 
    template <typename T>
-   T run(cares_asio::Task<T> task)
+   T run(cares_async::Task<T> task)
    {
       std::optional<T> result;
       std::exception_ptr failed;
@@ -87,7 +87,7 @@ protected:
       return std::move(*result);
    }
 
-   void start(cares_asio::Task<void> task)
+   void start(cares_async::Task<void> task)
    {
       boost::capy::run_async(
          executor(), []() noexcept {}, [](std::exception_ptr) noexcept {})(std::move(task));
@@ -130,7 +130,7 @@ protected:
       return true;
    }
 
-   static cares_asio::Endpoint endpoint(std::string_view address, unsigned short port)
+   static cares_async::Endpoint endpoint(std::string_view address, unsigned short port)
    {
       return {boost::corosio::ip_address(address), port};
    }

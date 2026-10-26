@@ -22,12 +22,12 @@
 
 using namespace testing;
 
-using cares_asio::error_code;
-using cares_asio::make_ares_error;
-using cares_asio::Task;
-using cares_asio::errors::canceled;
+using cares_async::error_code;
+using cares_async::make_ares_error;
+using cares_async::Task;
+using cares_async::errors::canceled;
 
-using results_type = cares_asio::resolver::results_type;
+using results_type = cares_async::resolver::results_type;
 using lookup_result = std::tuple<error_code, results_type>;
 
 class Corosio : public resolver_fixture
@@ -45,7 +45,7 @@ protected:
    void start_lookup(std::optional<lookup_result>& result, std::stop_token token,
                      std::string host = "www.example.test")
    {
-      start([](cares_asio::resolver& resolver, std::optional<lookup_result>& result,
+      start([](cares_async::resolver& resolver, std::optional<lookup_result>& result,
                std::stop_token token, std::string host) -> Task<void> {
          result = co_await boost::capy::run(std::move(token))(resolver.resolve(host, "443"));
       }(resolver, result, std::move(token), std::move(host)));
@@ -138,7 +138,7 @@ TEST_F(Stop, GivesUpWhenCorosioTimesTheLookupOut)
    // cancels the lookup and reports the timeout in its place.
    //
    std::optional<lookup_result> result;
-   start([](cares_asio::resolver& resolver,
+   start([](cares_async::resolver& resolver,
             std::optional<lookup_result>& result) -> Task<void> { //
       result = co_await boost::corosio::timeout(resolver.resolve("www.example.test", "443"),
                                                 std::chrono::milliseconds(300));
@@ -161,11 +161,11 @@ TEST_F(Lifetime, CompletesWhatIsPendingWhenTheResolverGoes)
    // The resolver lives on the heap for the sake of the address sanitizer, which knows about
    // memory that was given back.
    //
-   auto doomed = std::make_unique<cares_asio::resolver>(executor());
+   auto doomed = std::make_unique<cares_async::resolver>(executor());
    ASSERT_FALSE(doomed->set_servers(server.address()));
 
    std::optional<lookup_result> result;
-   start([](cares_asio::resolver& resolver,
+   start([](cares_async::resolver& resolver,
             std::optional<lookup_result>& result) -> Task<void> { //
       result = co_await resolver.resolve("www.example.test", "443");
    }(*doomed, result));
@@ -188,10 +188,10 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
 
    std::optional<lookup_result> result;
    {
-      auto doomed = std::make_unique<cares_asio::resolver>(executor());
+      auto doomed = std::make_unique<cares_async::resolver>(executor());
       ASSERT_FALSE(doomed->set_servers(server.address()));
 
-      start([](cares_asio::resolver& resolver,
+      start([](cares_async::resolver& resolver,
                std::optional<lookup_result>& result) -> Task<void> { //
          result = co_await resolver.resolve("www.example.test", "443");
       }(*doomed, result));
