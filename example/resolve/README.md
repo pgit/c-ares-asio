@@ -14,7 +14,7 @@ It is built along with the library where Boost.ProgramOptions and spdlog are fou
 loop itself, the signal handling, the workers of `--concurrency`, the resolver of the runtime --
 is in [`runtime.hpp`](runtime.hpp), one file per runtime, so that the program itself is the same
 on both. `build-corosio/example/resolve/resolve` is the one on capy/corosio, see
-[doc/corosio.md](../../doc/corosio.md).
+[doc/corosio.rst](../../doc/corosio.rst).
 
 (`--native` was `--asio` until the library grew a second runtime.)
 
@@ -48,7 +48,7 @@ given to `resolver::set_logger()` passing the messages on to spdlog.
 ## HTTPS records
 
 Besides the addresses, every name is also looked up for its HTTPS record. The two questions go out
-together, as [doc/https-records.md](../../doc/https-records.md) describes, and the printing stays
+together, as [doc/https-records.rst](../../doc/https-records.rst) describes, and the printing stays
 in a fixed order so the output does not depend on which answer lands first:
 
 ```sh
@@ -151,7 +151,7 @@ $ build/example/resolve/resolve --dot --server 1.1.1.1 --tls-hostname wrong.exam
 13:32:27.624 error www.google.com: Could not contact DNS servers
 ```
 
-How the transport works is in [doc/dns-over-tls.md](../../doc/dns-over-tls.md).
+How the transport works is in [doc/dns-over-tls.rst](../../doc/dns-over-tls.rst).
 
 ## Other servers
 

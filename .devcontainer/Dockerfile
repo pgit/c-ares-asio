@@ -18,19 +18,15 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive && \
 # ==================================================================================================
 
 #
-# MrDocs, which makes the reference documentation (cmake --build build --target docs). It is a
-# release of prebuilt binaries, pinned by what its archive hashes to. The docs workflow in
-# .github/workflows installs the same one.
+# What makes the documentation (cmake --build build --target docs): Doxygen for the comments in the
+# headers, Sphinx for the pages. These are the versions of the release of Debian that the base image
+# is on, which are known to work together. The docs workflow in .github/workflows installs the same.
 #
-ARG MRDOCS_RELEASE=2026.9.29
-ARG MRDOCS_SHA256=9d96e42f303046fb0b221aa9071eabccc40b9683e0b7af2b02a929d15476ca6a
-RUN curl -sSfL -o /tmp/mrdocs.tar.xz \
-        "https://github.com/cppalliance/mrdocs/releases/download/${MRDOCS_RELEASE}/MrDocs-${MRDOCS_RELEASE}-Linux.tar.xz" && \
-    echo "${MRDOCS_SHA256}  /tmp/mrdocs.tar.xz" | sha256sum --check && \
-    mkdir -p /opt/mrdocs && \
-    tar -xJf /tmp/mrdocs.tar.xz -C /opt/mrdocs --strip-components=1 && \
-    ln -s /opt/mrdocs/bin/mrdocs /usr/local/bin/mrdocs && \
-    rm /tmp/mrdocs.tar.xz
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive && \
+    apt-get -y install --no-install-recommends \
+        doxygen python3-sphinx python3-breathe python3-sphinx-rtd-theme && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # ==================================================================================================
 

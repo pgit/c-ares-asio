@@ -13,7 +13,7 @@ endif()
 
 #
 # What the program needs of its event loop is in runtime.hpp, one file per runtime, so that the
-# program itself is the same on either -- see ../../doc/corosio.md.
+# program itself is the same on either -- see ../../doc/corosio.rst.
 #
 string(TOLOWER ${C_ARES_ASYNC_API} c_ares_async_api_dir)
 

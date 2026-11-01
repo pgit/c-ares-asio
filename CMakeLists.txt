@@ -28,7 +28,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 #
 # The I/O runtime, one per build tree: ASIO (completion tokens, on Boost.Asio) or COROSIO
 # (coroutines only, on capy/corosio). The code tests C_ARES_ASYNC_ASIO or C_ARES_ASYNC_COROSIO,
-# exactly one of which is 1, from the generated c_ares_async/config.hpp. See doc/corosio.md.
+# exactly one of which is 1, from the generated c_ares_async/config.hpp. See doc/corosio.rst.
 #
 set(C_ARES_ASYNC_API "ASIO" CACHE STRING "I/O runtime to build on: ASIO or COROSIO")
 set_property(CACHE C_ARES_ASYNC_API PROPERTY STRINGS ASIO COROSIO)
@@ -51,7 +51,8 @@ endif()
 
 option(C_ARES_ASYNC_BUILD_TESTS "Build the tests of c_ares_async" ${c_ares_async_tests_default})
 option(C_ARES_ASYNC_BUILD_EXAMPLES "Build the examples of c_ares_async" ${PROJECT_IS_TOP_LEVEL})
-option(C_ARES_ASYNC_BUILD_DOCS "Add the 'docs' target, where MrDocs is there to make them"
+option(C_ARES_ASYNC_BUILD_DOCS
+       "Build the code of the guide, and add the 'docs' target where Doxygen and Sphinx are there"
        ${PROJECT_IS_TOP_LEVEL})
 option(C_ARES_ASYNC_INSTALL "Generate the install rules of c_ares_async"
        ${c_ares_async_install_default})

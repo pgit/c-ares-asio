@@ -30,6 +30,9 @@
 #include <boost/asio/async_result.hpp>
 #endif
 
+/** Name resolution with c-ares, as asynchronous operations of the runtime
+    the library was built on.
+ */
 namespace c_ares_async
 {
 
@@ -108,7 +111,7 @@ struct tls_options
    bool verify = true;
 };
 
-/** How much a message from a @ref resolver matters.
+/** How much a message from a @ref c_ares_async::resolver matters.
 
     @see log_function
  */
@@ -159,7 +162,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
     `C_ARES_ASYNC_COROSIO` build have in common: it yields the error and the
     result as a tuple. On Boost.Asio there is also @ref async_resolve and
     @ref async_resolve_https, which take any completion token. See
-    `doc/corosio.md`.
+    `doc/corosio.rst`.
 
     @par Thread safety
     Distinct objects: safe. Shared objects: unsafe. Where the context runs on

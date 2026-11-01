@@ -92,7 +92,7 @@ protected:
    //
    // Held by pointer rather than in a std::optional, which asks whether a resolver converts to
    // an executor -- a question capy's any_executor answers by failing to compile, see
-   // doc/corosio.md.
+   // doc/corosio.rst.
    //
    std::unique_ptr<c_ares_async::resolver> resolver;
 
