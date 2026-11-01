@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop of Boost.Asio, see ../event_loop.hpp.
+// The event loop of Asio, see ../event_loop.hpp.
 //
 #pragma once
 
@@ -27,7 +27,7 @@ namespace c_ares_async::detail
 
 //
 // corosio/event_loop.hpp has two more of these, launch() and yield_now(), which have nothing to
-// do here: a wait of ASIO's only ever completes from the event loop, so nothing has to be put
+// do here: a wait of Asio's only ever completes from the event loop, so nothing has to be put
 // there by hand to keep it off the stack of whoever armed it.
 //
 
@@ -48,7 +48,7 @@ class Descriptor
 {
 public:
    //
-   // Throws system_error where 'fd' cannot be watched, as ASIO's own constructor does.
+   // Throws system_error where 'fd' cannot be watched, as Asio's own constructor does.
    //
    Descriptor(const Executor& executor, int fd) : descriptor_(executor, fd) {}
    ~Descriptor() { detach(); }

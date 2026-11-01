@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25...4.4)
 project(
     c_ares_async
     VERSION 0.1.0
-    DESCRIPTION "c-ares name resolution as asynchronous operations, on Boost.Asio or corosio"
+    DESCRIPTION "c-ares name resolution as asynchronous operations, on Asio or Corosio"
     HOMEPAGE_URL "https://github.com/pgit/c-ares-async"
     LANGUAGES CXX)
 
@@ -26,15 +26,15 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 #
 
 #
-# The I/O runtime, one per build tree: ASIO (completion tokens, on Boost.Asio) or COROSIO
-# (coroutines only, on capy/corosio). The code tests C_ARES_ASYNC_ASIO or C_ARES_ASYNC_COROSIO,
+# The I/O runtime, one per build tree: ASIO (completion tokens, on Asio) or COROSIO
+# (coroutines only, on Corosio). The code tests C_ARES_ASYNC_ASIO or C_ARES_ASYNC_COROSIO,
 # exactly one of which is 1, from the generated c_ares_async/config.hpp. See doc/corosio.rst.
 #
 set(C_ARES_ASYNC_API "ASIO" CACHE STRING "I/O runtime to build on: ASIO or COROSIO")
 set_property(CACHE C_ARES_ASYNC_API PROPERTY STRINGS ASIO COROSIO)
 
 #
-# capy and corosio are built from pinned sources as part of a COROSIO build and are not installed,
+# Capy and Corosio are built from pinned sources as part of a COROSIO build and are not installed,
 # so there is nothing an installed COROSIO build could be linked against.
 #
 if (C_ARES_ASYNC_API STREQUAL "COROSIO")
@@ -82,7 +82,7 @@ if (C_ARES_ASYNC_API STREQUAL "ASIO")
     set(C_ARES_ASYNC_COROSIO 0)
     set(c_ares_async_runtime_libraries Boost::headers)
     find_package(Boost ${C_ARES_ASYNC_BOOST_VERSION} REQUIRED)
-    message(STATUS "c_ares_async: using I/O runtime Boost.Asio ${Boost_VERSION}")
+    message(STATUS "c_ares_async: using I/O runtime Asio of Boost ${Boost_VERSION}")
 elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
     set(C_ARES_ASYNC_ASIO 0)
     set(C_ARES_ASYNC_COROSIO 1)
@@ -110,7 +110,7 @@ elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
         GIT_TAG 41d0de18b6e4fa1b397c38a866f2daf52c6c36b5
         EXCLUDE_FROM_ALL)
     FetchContent_MakeAvailable(capy corosio)
-    message(STATUS "c_ares_async: using I/O runtime capy/corosio")
+    message(STATUS "c_ares_async: using I/O runtime Corosio")
 else()
     message(FATAL_ERROR "C_ARES_ASYNC_API is '${C_ARES_ASYNC_API}', expected ASIO or COROSIO")
 endif()
@@ -190,7 +190,7 @@ target_sources(
 
 target_compile_features(c_ares_async PUBLIC cxx_std_20)
 
-# our own sources stay clear of the deprecated ASIO interfaces
+# our own sources stay clear of the deprecated Asio interfaces
 if (C_ARES_ASYNC_ASIO)
     target_compile_definitions(c_ares_async PRIVATE BOOST_ASIO_NO_DEPRECATED)
 endif()
@@ -227,7 +227,7 @@ set_target_properties(
 if (C_ARES_ASYNC_INSTALL)
     if (C_ARES_ASYNC_COROSIO)
         message(FATAL_ERROR "C_ARES_ASYNC_INSTALL does not work with C_ARES_ASYNC_API=COROSIO: "
-                            "capy and corosio are built from pinned sources here and not "
+                            "Capy and Corosio are built from pinned sources here and not "
                             "installed, so the exported target would point at libraries that are "
                             "not there.")
     endif()

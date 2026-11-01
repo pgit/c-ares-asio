@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The shortest program that resolves a name, on capy/corosio: the addresses of a host, and then
-// its HTTPS record, each awaited in a coroutine. ../asio/minimal.cpp is the same on Boost.Asio.
+// The shortest program that resolves a name, on corosio: the addresses of a host, and then
+// its HTTPS record, each awaited in a coroutine. ../asio/minimal.cpp is the same on Asio.
 //
 //    minimal [host]
 //
@@ -27,7 +27,7 @@ c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string hos
       std::cerr << host << ": " << ec.message() << '\n';
 
    //
-   // corosio has no output operator for an endpoint, so here is one: the address, in brackets
+   // Corosio has no output operator for an endpoint, so here is one: the address, in brackets
    // where it is an IPv6 one, and the port behind it.
    //
    const auto text = [](const c_ares_async::Endpoint& endpoint) {

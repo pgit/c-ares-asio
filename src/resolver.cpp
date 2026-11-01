@@ -394,8 +394,8 @@ resolver::~resolver()
 // --------------------------------------------------------------------------------------------------
 
 //
-// The one spelling of the operations that both runtimes have. On corosio it is all there is; on
-// Boost.Asio initiate() is a deferred operation with the handler of a completion token behind it,
+// The one spelling of the operations that both runtimes have. On Corosio it is all there is; on
+// Asio initiate() is a deferred operation with the handler of a completion token behind it,
 // so neither runtime pays for a front end it does not use.
 //
 Task<std::tuple<error_code, resolver::results_type>> resolver::resolve(std::string host,
@@ -502,7 +502,7 @@ void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
 
    //
    // Neither readable nor writable means c-ares is about to close the socket. The file descriptor
-   // is still valid at this point, so this is our chance to get it out of ASIO's reactor.
+   // is still valid at this point, so this is our chance to get it out of Asio's reactor.
    //
    if (!readable && !writable)
    {

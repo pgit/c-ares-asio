@@ -1,10 +1,13 @@
 # c-ares-async
 
-[c-ares](https://c-ares.org/) name resolution as asynchronous operations, on
-[Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) or on
-capy/corosio.
+A small wrapper around the [c-ares](https://c-ares.org/) DNS library that makes its lookups
+asynchronous operations, using either
+[Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) or
+[Corosio](https://github.com/cppalliance/corosio) as the async runtime.
 
-ASIO's own `ip::tcp::resolver` runs `getaddrinfo()` on an internal thread: one lookup at a time,
+**THIS REPOSITORY IS PURELY EXPERIMENTAL**
+
+Asio's own `ip::tcp::resolver` runs `getaddrinfo()` on an internal thread: one lookup at a time,
 blocking, and with addresses for an answer and nothing else. `c_ares_async::resolver` has c-ares do
 the asking instead, driven by the event loop of the application -- no thread of its own, any
 number of lookups in flight at once, and more to ask for than addresses:
@@ -17,10 +20,10 @@ number of lookups in flight at once, and more to ask for than addresses:
 * as operations that take any completion token -- `use_awaitable`, `deferred`, `use_future`, a
   callback -- and can be cancelled.
 
-The same library also builds on [capy](https://github.com/cppalliance/capy)/[corosio](https://github.com/cppalliance/corosio)
-instead of Boost.Asio, where the operations are coroutines and nothing else. One build tree is one
-runtime or the other, `-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.rst)
-for what the two map to.
+On Corosio, which has [Capy](https://github.com/cppalliance/capy) as a dependency, the operations
+are coroutines and nothing else. One build tree is one runtime or the other,
+`-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the Corosio runtime](doc/corosio.rst) for what the two
+map to.
 
 ## Example
 
@@ -56,8 +59,8 @@ int main()
 ```
 
 Both runtimes have the same operation as a coroutine, which yields the error and the result as a
-tuple -- `resolve()` and `resolve_https()`. On corosio that is all there is, and the program around
-it is capy's:
+tuple -- `resolve()` and `resolve_https()`. On Corosio that is all there is, and the program around
+it is Capy's:
 
 ```cpp
 c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string host)
@@ -86,7 +89,7 @@ names at once, DNS over TLS, cancellation.
   ones the tests run with.
 * CMake 3.25 or later.
 * [Boost](https://www.boost.org/) 1.88 or later, of which only headers are used. A COROSIO build
-  needs no Boost at all: capy and corosio are fetched at pinned commits and built along with the
+  needs no Boost at all: Capy and Corosio are fetched at pinned commits and built along with the
   library.
 * [c-ares](https://c-ares.org/) 1.34 or later. Make that 1.34.7 where lookups get cancelled: up
   to there, `ares_cancel()` can run into
@@ -126,7 +129,7 @@ sight: no header of the library includes one of its.
 
 | Option | Default | |
 | --- | --- | --- |
-| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.rst](doc/corosio.rst). |
+| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). |
 | `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
 | `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
@@ -154,7 +157,7 @@ ctest --preset dev
 | `tsan` | `build-tsan` | With the thread sanitizer. |
 | `openssl` | `build-openssl` | OpenSSL instead of AWS-LC, and the library as a shared one. |
 | `gcc` | `build-gcc` | GCC and libstdc++. |
-| `corosio` | `build-corosio` | On capy/corosio instead of Boost.Asio. |
+| `corosio` | `build-corosio` | On Corosio instead of Asio. |
 | `corosio-asan` | `build-corosio-asan` | The same, with the address and undefined behaviour sanitizers. |
 
 Anywhere else it is a CMake project like any other:
@@ -182,7 +185,7 @@ source tree -- which is what keeps the two CMake snippets above true.
 * [The API reference](doc/reference.rst), made from the comments in
   [`include/c_ares_async`](include/c_ares_async) by [Doxygen](https://www.doxygen.nl).
 * [How the integration works](doc/design.rst): c-ares in an event loop.
-* [The corosio runtime](doc/corosio.rst): the second runtime, and what porting to it found.
+* [The Corosio runtime](doc/corosio.rst): the second runtime, and what porting to it found.
 * [HTTPS records](doc/https-records.rst)
 * [DNS over TLS](doc/dns-over-tls.rst)
 
@@ -190,8 +193,8 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 * **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
-  then completes with `c_ares_async::errors::canceled` -- `operation_aborted` on Boost.Asio,
-  `capy::error::canceled` on corosio.
+  then completes with `c_ares_async::errors::canceled` -- `operation_aborted` on Asio,
+  `capy::error::canceled` on Corosio.
 * **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
   executor a strand and start the lookups from inside it.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is

@@ -57,8 +57,8 @@ The runtime
 
    #include <c_ares_async/runtime.hpp>
 
-What the interface is written in, and what each name is on Boost.Asio. On corosio the same names
-are something else, which :ref:`the table in the corosio page <corosio-runtimes>` has.
+What the interface is written in, and what each name is on Asio. On Corosio the same names
+are something else, which :ref:`the table in the Corosio page <corosio-runtimes>` has.
 
 .. doxygentypedef:: c_ares_async::Task
 

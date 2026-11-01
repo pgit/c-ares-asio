@@ -9,8 +9,8 @@ the application. :src:`src/resolver.cpp` holds all of it:
 * the channel is created with ``ARES_OPT_SOCK_STATE_CB``, so c-ares reports every socket it opens,
   closes, or changes its read/write interest on -- no c-ares event thread is involved;
 * each such socket gets a non-owning ``detail::Descriptor`` (``src/event_loop.hpp``), which waits for
-  readiness on it and is detached again before c-ares closes the socket. On Boost.Asio that is a
-  ``posix::stream_descriptor`` and ``async_wait()``; the other runtime is in :doc:`the corosio page <corosio>`;
+  readiness on it and is detached again before c-ares closes the socket. On Asio that is a
+  ``posix::stream_descriptor`` and ``async_wait()``; the other runtime is in :doc:`the Corosio page <corosio>`;
 * readiness is fed back with `ares_process_fds() <https://c-ares.org/docs/ares_process_fds.html>`__.
   Since the socket state callback only fires on *changes*, the waits are re-armed after every call;
 * ``ares_timeout()`` drives a ``detail::Timer``, whose expiry calls ``ares_process_fds()`` with no
@@ -23,7 +23,7 @@ the application. :src:`src/resolver.cpp` holds all of it:
 
 Queries come in two spellings, and are the same operation behind both: :cpp:func:`resolve() <resolver::resolve>` and
 :cpp:func:`resolve_https() <resolver::resolve_https>`, coroutines that yield the error and the result as a tuple, which is what either
-runtime has; and, on Boost.Asio, :cpp:func:`async_resolve() <resolver::async_resolve>` and :cpp:func:`async_resolve_https() <resolver::async_resolve_https>` through
+runtime has; and, on Asio, :cpp:func:`async_resolve() <resolver::async_resolve>` and :cpp:func:`async_resolve_https() <resolver::async_resolve_https>` through
 ``async_initiate``, which take ``use_awaitable``, ``as_tuple``, ``deferred``, callbacks and futures alike.
 
 Completion
@@ -38,9 +38,9 @@ handler is associated with, if it has one.
 The same holds in the other direction, and c-ares does not survive it being broken: a readiness
 wait must not call ``ares_process_fds()`` from inside one that is already running. It would be,
 otherwise, since the waits are armed from the socket state callback, which c-ares calls from in
-there. On Boost.Asio a wait only ever completes from the event loop, so the question does not come
+there. On Asio a wait only ever completes from the event loop, so the question does not come
 up; the other runtime completes one whose readiness holds already right where it is started, and
-posts it for that reason -- see :doc:`the corosio page <corosio>`.
+posts it for that reason -- see :doc:`the Corosio page <corosio>`.
 
 Cancellation
 ------------
@@ -50,8 +50,8 @@ request, so cancelling one calls ``ares_cancel()``, which takes every pending qu
 with it -- the lookups of every other name in flight included. Each of them completes with
 :cpp:var:`errors::canceled`, which is what ``ARES_ECANCELLED`` and ``ARES_EDESTRUCTION`` are reported as, and
 which is ``boost::asio::error::operation_aborted`` here and ``boost::capy::error::canceled`` on the
-other runtime. What does the cancelling is a cancellation slot on Boost.Asio and the
-``std::stop_token`` of the awaiting coroutine on corosio.
+other runtime. What does the cancelling is a cancellation slot on Asio and the
+``std::stop_token`` of the awaiting coroutine on Corosio.
 
 That puts some weight on ``ares_cancel()``, which is worth knowing about:
 `GHSA-6wfj-rwm7-3542 <https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542>`__

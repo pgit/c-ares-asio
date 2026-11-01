@@ -226,7 +226,7 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
 
       //
       // SO_ERROR is consume-on-read, and an event loop that reads it in order to report the
-      // failure of the socket as the failure of the wait -- corosio's does -- leaves a zero
+      // failure of the socket as the failure of the wait -- Corosio's does -- leaves a zero
       // behind. getpeername() answers the same question and keeps answering it: a socket whose
       // connect did not go through has no peer.
       //

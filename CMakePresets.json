@@ -99,8 +99,8 @@
         },
         {
             "name": "corosio",
-            "displayName": "corosio",
-            "description": "The library on capy/corosio instead of Boost.Asio, in build-corosio/: coroutines only, and capy and corosio are fetched at the commits CMakeLists.txt pins",
+            "displayName": "Corosio",
+            "description": "The library on Corosio instead of Asio, in build-corosio/: coroutines only, and Capy and Corosio are fetched at the commits CMakeLists.txt pins",
             "inherits": [
                 "devcontainer",
                 "aws-lc"
@@ -113,7 +113,7 @@
         },
         {
             "name": "corosio-asan",
-            "displayName": "corosio, AddressSanitizer + UBSan",
+            "displayName": "Corosio, AddressSanitizer + UBSan",
             "inherits": [
                 "devcontainer",
                 "aws-lc"

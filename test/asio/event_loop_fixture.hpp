@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop of Boost.Asio, for a test to drive: one io_context, which the resolver and the
+// The event loop of Asio, for a test to drive: one io_context, which the resolver and the
 // fake DNS server share, stepped by the test itself -- see run.hpp.
 //
 #pragma once
@@ -32,7 +32,7 @@ protected:
    c_ares_async::Executor executor() { return context.get_executor(); }
 
    //
-   // What the fake DNS server runs on, which is Boost.Asio on either runtime. Here it is the one
+   // What the fake DNS server runs on, which is Asio on either runtime. Here it is the one
    // context there is.
    //
    boost::asio::any_io_executor server_executor() { return context.get_executor(); }

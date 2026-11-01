@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop of corosio, see ../event_loop.hpp. asio/event_loop.hpp has the documentation of
+// The event loop of Corosio, see ../event_loop.hpp. asio/event_loop.hpp has the documentation of
 // each of these, and what is said here is what differs.
 //
 #pragma once
@@ -44,7 +44,7 @@ namespace c_ares_async::detail
 
 //
 // Starts 'task' on 'executor', detached, with 'token' to stop it: nobody waits for it, and what
-// it throws is dropped. corosio has no co_spawn(), and this is what capy starts a task with.
+// it throws is dropped. Corosio has no co_spawn(), and this is what Capy starts a task with.
 //
 inline void launch(const Executor& executor, std::stop_token token, Task<void> task)
 {
@@ -54,7 +54,7 @@ inline void launch(const Executor& executor, std::stop_token token, Task<void> t
 }
 
 //
-// Lets whatever else is ready to run on the caller's executor run first. capy starts a task by
+// Lets whatever else is ready to run on the caller's executor run first. Capy starts a task by
 // dispatching it, which runs it inline where the caller is on its executor already -- so this is
 // what a task awaits to be sure it is not on the stack of whoever launched it.
 //
@@ -83,7 +83,7 @@ enum class wait_type
 //
 // One socket of c-ares', watched but not owned.
 //
-// corosio has no descriptor type that would take any file descriptor: readiness comes from the
+// Corosio has no descriptor type that would take any file descriptor: readiness comes from the
 // sockets, which is where assign() adopts one that was made elsewhere -- and the socket has to be
 // of the right kind, so which one it is comes from SO_TYPE. Either way nothing but wait() is ever
 // called on it, and release() hands the descriptor back to c-ares' ownership.
@@ -144,8 +144,8 @@ public:
    // called -- on the stack of that very call. c-ares does not survive being re-entered like
    // that: it closes its connections underneath itself and comes apart.
    //
-   // corosio answers "is this socket ready" with a poll() of its own before it parks anything,
-   // which is what makes this the common case rather than a rare one, where Boost.Asio only ever
+   // Corosio answers "is this socket ready" with a poll() of its own before it parks anything,
+   // which is what makes this the common case rather than a rare one, where Asio only ever
    // completes a wait from its own event loop.
    //
    template <typename F>
@@ -182,8 +182,8 @@ private:
          //
          // A socket that has failed is ready as far as a wait is concerned: whoever owns it --
          // c-ares, or the TLS session underneath it -- is the one to find the failure out, by
-         // reading or writing, and to fail or retry its query over it. corosio reports the error
-         // of the socket as the error of the wait, where Boost.Asio reports such a wait as ready,
+         // reading or writing, and to fail or retry its query over it. Corosio reports the error
+         // of the socket as the error of the wait, where Asio reports such a wait as ready,
          // so this is where the two are made to say the same thing.
          //
          if (ec && ec != boost::capy::cond::canceled && ec != std::errc::bad_file_descriptor)
@@ -201,7 +201,7 @@ private:
 };
 
 //
-// corosio has a re-armable timer in its detail namespace only; what it offers is a delay, so
+// Corosio has a re-armable timer in its detail namespace only; what it offers is a delay, so
 // every arm() is a task of its own that the next arm() or cancel() stops.
 //
 // A delay that has expired may still be queued behind the executor when it is stopped, so the

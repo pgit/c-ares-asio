@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The runtime layer for capy/corosio: coroutines only, capy::task, capy::any_executor, and
-// std::stop_token where ASIO has cancellation slots. See c_ares_async/runtime.hpp for what this is;
+// The runtime layer for corosio: coroutines only, capy::task, capy::any_executor, and
+// std::stop_token where Asio has cancellation slots. See c_ares_async/runtime.hpp for what this is;
 // asio/runtime.hpp defines the same names in the same order and has their documentation, and what
 // is said here is what differs.
 //
@@ -108,7 +108,7 @@ struct completion_state
    bool starting = false; // the operation is being started, see initiation::await_suspend()
 
    //
-   // Never resumes the caller inline: it is posted to the caller's executor, which is what ASIO's
+   // Never resumes the caller inline: it is posted to the caller's executor, which is what Asio's
    // post() does for the handler there. A c-ares callback runs from inside ares_getaddrinfo() or
    // ares_process_fds(), and resuming the application in there would let it call back into
    // c-ares from inside it.
@@ -228,7 +228,7 @@ public:
    explicit initiation(Init init) : init_(std::move(init)) {}
 
    //
-   // capy awaits nothing it cannot move, and moving one of these is only ever done before it is
+   // Capy awaits nothing it cannot move, and moving one of these is only ever done before it is
    // awaited, while its state is still empty: the stop callback in there does not move.
    //
    initiation(initiation&& other) noexcept(std::is_nothrow_move_constructible_v<Init>)
@@ -255,7 +255,7 @@ public:
       //
       // An operation that completes while it is being started resumes its caller right away, once
       // the initiation has returned: by then the stack is the caller's own again, with no c-ares
-      // call on it. That is what ASIO's awaitables do, too.
+      // call on it. That is what Asio's awaitables do, too.
       //
       state_.starting = true;
       init_(Completion<Signature>(&state_));

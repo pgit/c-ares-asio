@@ -160,7 +160,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
     Both lookups come as a coroutine, @ref resolve and @ref resolve_https,
     which is the spelling that an `C_ARES_ASYNC_ASIO` and an
     `C_ARES_ASYNC_COROSIO` build have in common: it yields the error and the
-    result as a tuple. On Boost.Asio there is also @ref async_resolve and
+    result as a tuple. On Asio there is also @ref async_resolve and
     @ref async_resolve_https, which take any completion token. See
     `doc/corosio.rst`.
 
@@ -171,8 +171,8 @@ using log_function = std::function<void(log_level, std::string_view)>;
 
     @par Cancellation
     Both operations can be cancelled -- by any type of cancellation on
-    Boost.Asio, by the `std::stop_token` of the awaiting coroutine on
-    corosio -- and then complete with @ref errors::canceled. But c-ares has
+    Asio, by the `std::stop_token` of the awaiting coroutine on
+    Corosio -- and then complete with @ref errors::canceled. But c-ares has
     no handle for a single request, so cancelling one operation cancels
     every operation that is pending on the resolver.
 
@@ -311,7 +311,7 @@ public:
 
        This is the coroutine spelling, which both runtimes have: it yields
        the error and the endpoints as a tuple, the way the completion token
-       `as_tuple(use_awaitable)` does on Boost.Asio.
+       `as_tuple(use_awaitable)` does on Asio.
 
        @par Errors
        Any of the c-ares status codes, as @ref make_ares_error makes them --
@@ -355,8 +355,8 @@ public:
    /** Resolves a host name to the endpoints of a service, with a completion
        token.
 
-       The same lookup as @ref resolve, as an ASIO asynchronous operation.
-       Boost.Asio only.
+       The same lookup as @ref resolve, as an Asio asynchronous operation.
+       Asio only.
 
        @par Completion signature
        @code
@@ -389,8 +389,8 @@ public:
    /** Resolves the HTTPS records (RFC 9460) of a host name, with a
        completion token.
 
-       The same lookup as @ref resolve_https, as an ASIO asynchronous
-       operation. Boost.Asio only.
+       The same lookup as @ref resolve_https, as an Asio asynchronous
+       operation. Asio only.
 
        @par Completion signature
        @code

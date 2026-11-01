@@ -3,7 +3,7 @@
 
 //
 // The I/O runtime the library is built on, and the vocabulary its interface is written in:
-// Boost.Asio with completion tokens (C_ARES_ASYNC_ASIO=1), or capy/corosio with coroutines only
+// Asio with completion tokens (C_ARES_ASYNC_ASIO=1), or Corosio with coroutines only
 // (C_ARES_ASYNC_COROSIO=1). A build tree is one or the other, see doc/corosio.rst.
 //
 //    Task<T>, Executor, error_code, error_category, system_error  -- what the runtime calls things

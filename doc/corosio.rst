@@ -1,11 +1,12 @@
 .. cpp:namespace:: c_ares_async
 
-The corosio runtime, next to Boost.Asio
-=======================================
+The Corosio runtime, next to Asio
+=================================
 
-One source tree that builds either as it always did, on Boost.Asio with completion tokens, or on
-`capy <https://github.com/cppalliance/capy>`__/`corosio <https://github.com/cppalliance/corosio>`__ with
-a coroutine-only API. The choice is made at configure time:
+One source tree that builds either as it always did, on Asio with completion tokens, or on
+`Corosio <https://github.com/cppalliance/corosio>`__ with a coroutine-only API. Corosio has `Capy
+<https://github.com/cppalliance/capy>`__ as a dependency, which is where the task and executor types
+below come from. The choice is made at configure time:
 
 .. code-block:: sh
 
@@ -13,7 +14,7 @@ a coroutine-only API. The choice is made at configure time:
    cmake --build --preset corosio
    ctest --preset corosio
 
-``C_ARES_ASYNC_API`` is ``ASIO`` or ``COROSIO`` and nothing else is needed: capy and corosio are fetched
+``C_ARES_ASYNC_API`` is ``ASIO`` or ``COROSIO`` and nothing else is needed: Capy and Corosio are fetched
 at the commits :src:`CMakeLists.txt` pins and built as part of the build. A
 COROSIO build needs no Boost at all -- which is also why it has no install rules, see
 :ref:`Constraints <corosio-constraints>`.
@@ -57,8 +58,8 @@ Both have the same coroutine spelling, which yields the error and the result as 
 
    auto [ec, endpoints] = co_await resolver.resolve("example.com", "443");
 
-That is what the shared tests are written in. On Boost.Asio it is :cpp:func:`async_resolve() <resolver::async_resolve>` with
-``as_tuple(use_awaitable)`` behind it; on corosio it is a ``capy::task``, since
+That is what the shared tests are written in. On Asio it is :cpp:func:`async_resolve() <resolver::async_resolve>` with
+``as_tuple(use_awaitable)`` behind it; on Corosio it is a ``capy::task``, since
 ``capy::results<T>`` *is* ``std::tuple<std::error_code, T>`` -- so a lookup goes into
 ``corosio::timeout()`` and ``capy::when_all()`` as it is, with nothing in between.
 
@@ -97,17 +98,17 @@ spelling, and runs on either runtime. What is about one runtime only has a file 
 executors, cancellation slots and strands, :src:`test/corosio/stop_test.cpp`
 for stop tokens and ``corosio::timeout()``.
 
-The fake DNS server stays on Boost.Asio in both: it serves UDP, TCP and TLS, and a second
+The fake DNS server stays on Asio in both: it serves UDP, TCP and TLS, and a second
 implementation of it would only be a second thing to keep right. The COROSIO fixture steps its
 ``asio::io_context`` and the resolver's ``corosio::io_context`` from the one thread the test runs on,
-so the tests stay as deterministic as they are on ASIO.
+so the tests stay as deterministic as they are on Asio.
 
 What the port found
 -------------------
 
 Three of these are bugs that were in the ASIO build all along, where they are races rather than
-certainties -- corosio answers "is this socket ready" with a ``poll()`` of its own before it parks
-anything, so what ASIO gets to one turn of the event loop later happens here right away.
+certainties -- Corosio answers "is this socket ready" with a ``poll()`` of its own before it parks
+anything, so what Asio gets to one turn of the event loop later happens here right away.
 
 * **c-ares must not be re-entered.** It hands its sockets over from inside ``ares_process_fds()``,
   through the socket state callback, so a wait armed from there was started -- and, for a
@@ -121,13 +122,13 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
   writes the query a second time and drops the connection, which costs a lookup every retry it
   has. :src:`src/socket_functions.hpp` turns fast open down, as the TLS
   transport already did.
-* **SO_ERROR is consume-on-read.** corosio's reactor reads it to report the error of a socket as
+* **SO_ERROR is consume-on-read.** Corosio's reactor reads it to report the error of a socket as
   the error of the wait, which left the TLS transport's connect check with a zero and a handshake
   started on a dead socket -- all the way to a ``SIGPIPE``. It confirms the connect with
   ``getpeername()`` now, which answers the same question and keeps answering it.
 * **A socket that has failed is ready**, as far as a readiness wait is concerned: whoever owns the
-  socket is the one to find the failure out, by reading or writing. Boost.Asio reports such a wait
-  as ready; corosio reports the error of the socket, and the COROSIO ``Descriptor`` maps that back.
+  socket is the one to find the failure out, by reading or writing. Asio reports such a wait
+  as ready; Corosio reports the error of the socket, and the COROSIO ``Descriptor`` maps that back.
 * **A timer that has expired may still be queued** when it is re-armed or cancelled, in both
   runtimes. Each wait carries a stop token of its own, and a callback that finds it triggered
   keeps quiet -- which is also what keeps a timeout that was due when the resolver went away from
@@ -143,22 +144,22 @@ Constraints
   frames are destroyed, and nothing is resumed or delivered. Whatever parks a coroutine therefore
   carries the owner of its chain in its ``capy::continuation``, without which this leaks
   (``build-corosio-asan/`` is where LeakSanitizer says so). The resolver still has to go before its
-  context, like any I/O object of corosio's.
+  context, like any I/O object of Corosio's.
 * **A lookup is held by its resolver, not by the context.** So teardown cannot reach a coroutine
   that owns its resolver and is suspended in a lookup of that very resolver, directly or through
-  ``corosio::timeout()``: the frame holds the resolver, which holds the frame, and it leaks. ASIO
+  ``corosio::timeout()``: the frame holds the resolver, which holds the frame, and it leaks. Asio
   leaks there, too. Stop such a lookup, or keep the resolver out of the frame.
 * **corosio::io_context::poll() does not ask the reactor.** It runs what is ready already; a
   socket that became readable in the meantime is not noticed. Stepping such a context by hand
   takes ``run_one_for()``, see :src:`test/corosio/event_loop_fixture.hpp`.
-* **std::optional<c_ares_async::resolver> does not compile.** capy's ``any_executor`` has a
+* **std::optional<c_ares_async::resolver> does not compile.** Capy's ``any_executor`` has a
   converting constructor that is constrained on ``std::copy_constructible`` only, so asking whether
   a resolver converts to an executor -- which ``std::optional`` does, through
   ``is_trivially_move_constructible`` -- instantiates it with the resolver and fails inside. A
   ``std::unique_ptr`` works, and so does holding the resolver by value. To be filed upstream.
-* **corosio has no output operator for an endpoint.** ``endpoint.address()`` and ``endpoint.port()``
+* **Corosio has no output operator for an endpoint.** ``endpoint.address()`` and ``endpoint.port()``
   are there to be printed; the tests teach GoogleTest the same (``PrintTo``).
-* **No install rules.** capy and corosio are built from pinned sources here and not installed, so
+* **No install rules.** Capy and Corosio are built from pinned sources here and not installed, so
   an exported target would point at libraries that are not there. ``C_ARES_ASYNC_INSTALL`` is off by
   default in a COROSIO build and refuses to be turned on, which also means the two CMake
   consumer tests are ASIO-only.
@@ -167,7 +168,7 @@ Not done yet
 ------------
 
 * Threads. A resolver is for one thread at a time in either runtime, and where the ASIO build has
-  a strand test (``async_test.cpp``), the COROSIO one has none: ``capy::strand`` exists and corosio
+  a strand test (``async_test.cpp``), the COROSIO one has none: ``capy::strand`` exists and Corosio
   resumes a coroutine through the executor of its ``await_context``, so a resolver on a strand should stay
   on it, but nothing here runs it that way yet.
 * Moving the pins. Both libraries are pre-release and change their API on ``develop`` without

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The operations as ASIO asynchronous operations: every kind of completion token, the executor a
+// The operations as Asio asynchronous operations: every kind of completion token, the executor a
 // handler runs on, cancellation, and what becomes of an operation whose resolver goes away.
 //
 #include "../resolver_fixture.hpp"
@@ -193,7 +193,7 @@ TEST_F(Async, KeepsTheContextRunningUntilItIsDone)
 TEST(Strand, ServesAContextThatRunsOnSeveralThreads)
 {
    //
-   // A resolver is not for several threads at once, and a strand is how ASIO keeps them off one
+   // A resolver is not for several threads at once, and a strand is how Asio keeps them off one
    // another: as the resolver's executor it serializes everything the resolver does by itself,
    // and the lookups are started from inside it. The server gets a strand of its own.
    //

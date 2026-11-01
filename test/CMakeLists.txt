@@ -21,7 +21,7 @@ FetchContent_MakeAvailable(googletest)
 # Most of them are written in the spelling that both runtimes have (resolver::resolve(), see
 # resolver_fixture.hpp) and are built on either. What is about one runtime only -- completion
 # tokens here, stop tokens there -- is in asio/ or corosio/, next to the event loop fixture of
-# that runtime, and only the one of this build is compiled. The fake DNS server is Boost.Asio's
+# that runtime, and only the one of this build is compiled. The fake DNS server is Asio's
 # in both.
 #
 add_executable(
@@ -55,7 +55,7 @@ target_include_directories(c_ares_async_tests PRIVATE ../src)
 target_compile_definitions(c_ares_async_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
 
 #
-# The fake DNS server is written in Boost.Asio whichever runtime the library was built on, so the
+# The fake DNS server is written in Asio whichever runtime the library was built on, so the
 # tests of a COROSIO build need Boost as well -- the library itself does not.
 #
 if (C_ARES_ASYNC_COROSIO)

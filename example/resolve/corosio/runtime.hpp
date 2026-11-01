@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// What the program needs of capy/corosio, see ../runtime.hpp. asio/runtime.hpp has the
+// What the program needs of Corosio, see ../runtime.hpp. asio/runtime.hpp has the
 // documentation of each of these, and what is said here is what differs.
 //
 #pragma once
@@ -46,7 +46,7 @@ inline c_ares_async::Executor executor_of(Context& context)
 }
 
 //
-// The signal handling is a task of its own here, since what corosio offers is a signal to wait
+// The signal handling is a task of its own here, since what Corosio offers is a signal to wait
 // for rather than a callback. Stopping the lookups is a stop request on the task that runs them.
 //
 inline void run_main(Context& context, c_ares_async::Task<void> task, bool verbose)
@@ -124,14 +124,14 @@ public:
    {
    }
 
-   static constexpr std::string_view name = "the corosio resolver";
+   static constexpr std::string_view name = "the Corosio resolver";
 
    //
-   // corosio has a pool of threads for the blocking calls (io_context_options::threads), so a
+   // Corosio has a pool of threads for the blocking calls (io_context_options::threads), so a
    // handful of lookups do go out at the same time -- just not as many as --concurrency asks for.
    //
    static constexpr std::string_view concurrency_note =
-      "the corosio resolver has as many lookups in flight as its thread pool has threads";
+      "the Corosio resolver has as many lookups in flight as its thread pool has threads";
 
    c_ares_async::Task<std::tuple<c_ares_async::error_code, c_ares_async::resolver::results_type>>
    resolve(const std::string& host, const std::string& service)

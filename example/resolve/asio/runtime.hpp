@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// What the program needs of Boost.Asio, see ../runtime.hpp.
+// What the program needs of Asio, see ../runtime.hpp.
 //
 #pragma once
 
@@ -138,15 +138,15 @@ class native_resolver
 public:
    explicit native_resolver(const c_ares_async::Executor& executor) : resolver_(executor) {}
 
-   static constexpr std::string_view name = "the ASIO resolver";
+   static constexpr std::string_view name = "the Asio resolver";
 
    //
-   // However many lookups are handed over at once, they are answered one after the other: ASIO
+   // However many lookups are handed over at once, they are answered one after the other: Asio
    // calls getaddrinfo() on a single thread unless its resolver.threads configuration says
    // otherwise.
    //
    static constexpr std::string_view concurrency_note =
-      "the ASIO resolver works through its lookups one at a time";
+      "the Asio resolver works through its lookups one at a time";
 
    c_ares_async::Task<std::tuple<c_ares_async::error_code, c_ares_async::resolver::results_type>>
    resolve(const std::string& host, const std::string& service)

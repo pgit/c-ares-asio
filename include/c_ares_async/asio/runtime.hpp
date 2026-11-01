@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The runtime layer for Boost.Asio: completion tokens, asio::awaitable, any_io_executor. See
+// The runtime layer for Asio: completion tokens, asio::awaitable, any_io_executor. See
 // c_ares_async/runtime.hpp for what this is, and corosio/runtime.hpp for the other runtime, which
 // defines the same names in the same order.
 //

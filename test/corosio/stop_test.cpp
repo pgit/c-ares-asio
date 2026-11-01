@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The operations as corosio asynchronous operations: what a lookup yields, how a stop token
+// The operations as Corosio asynchronous operations: what a lookup yields, how a stop token
 // cancels it, and what becomes of one whose resolver goes away. The counterpart of
 // asio/async_test.cpp, which does the same for completion tokens and cancellation slots.
 //
@@ -73,7 +73,7 @@ TEST_F(Corosio, YieldsResultsThatCorosioTakes)
    // corosio::timeout() and capy::when_all() take -- no adapter in between.
    //
    static_assert(boost::corosio::detail::is_results_v<std::tuple<error_code, results_type>>,
-                 "resolve() has to yield something corosio's composite operations can be given");
+                 "resolve() has to yield something Corosio's composite operations can be given");
 }
 
 // --------------------------------------------------------------------------------------------------
@@ -138,7 +138,7 @@ TEST_F(Stop, GivesUpWhenCorosioTimesTheLookupOut)
 
    //
    // What a lookup yields is capy::results, so corosio::timeout() takes it as it is -- this is
-   // what cancel_after() is on the other runtime. The code is corosio's own: the deadline
+   // what cancel_after() is on the other runtime. The code is Corosio's own: the deadline
    // cancels the lookup and reports the timeout in its place.
    //
    std::optional<lookup_result> result;

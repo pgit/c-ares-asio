@@ -150,7 +150,7 @@ void log_to_stderr(c_ares_async::resolver& resolver)
 
 // --------------------------------------------------------------------------------------------------
 //
-// What only Boost.Asio has.
+// What only Asio has.
 //
 #if C_ARES_ASYNC_ASIO
 
@@ -252,7 +252,7 @@ void on_many_threads(asio::io_context& context)
 
 // --------------------------------------------------------------------------------------------------
 //
-// What only corosio has.
+// What only Corosio has.
 //
 #else
 

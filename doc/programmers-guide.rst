@@ -15,9 +15,10 @@ how it is all done rather than how it is used has a page of its own, starting wi
 Prerequisites
 -------------
 
-A C++20 compiler, c-ares 1.34 or later and Boost 1.88 or later. A build on capy/corosio needs no
-Boost, as those two are fetched along with the library. The README has :src:`the full list
-<README.md>`. Whichever way the library gets into the build, the target has the same name:
+A C++20 compiler, c-ares 1.34 or later and Boost 1.88 or later. A build on Corosio needs no
+Boost, as Corosio and its dependency Capy are fetched along with the library. The README has
+:src:`the full list <README.md>`. Whichever way the library gets into the build, the target has the
+same name:
 
 .. code-block:: cmake
 
@@ -33,14 +34,14 @@ and there is one header to include, which has everything:
 
 A build tree is on one runtime or the other, which is decided when it is configured:
 ``-DC_ARES_ASYNC_API=ASIO``, the default, or ``COROSIO``. The difference to a program is that
-corosio has no completion tokens, and that the types in the interface are those of the runtime.
+Corosio has no completion tokens, and that the types in the interface are those of the runtime.
 They have the same names on both, such as :cpp:type:`Task` and :cpp:type:`Endpoint`, and
-:ref:`the table on the corosio page <corosio-runtimes>` says what each name stands for.
+:ref:`the table on the Corosio page <corosio-runtimes>` says what each name stands for.
 
 A first lookup
 --------------
 
-The whole of a program on Boost.Asio, which looks up the addresses of a name and then its HTTPS
+The whole of a program on Asio, which looks up the addresses of a name and then its HTTPS
 record:
 
 .. literalinclude:: ../example/asio/minimal.cpp
@@ -50,7 +51,7 @@ record:
 A :cpp:class:`resolver` is made on an executor, and from then on everything it does happens there.
 There is no thread behind it, so nothing happens unless the context runs.
 
-The same program on corosio is :src:`example/corosio/minimal.cpp`.
+The same program on Corosio is :src:`example/corosio/minimal.cpp`.
 
 Two spellings of an operation
 -----------------------------
@@ -70,7 +71,7 @@ either:
 Completion tokens
 ^^^^^^^^^^^^^^^^^
 
-On Boost.Asio there are also :cpp:func:`resolver::async_resolve` and
+On Asio there are also :cpp:func:`resolver::async_resolve` and
 :cpp:func:`resolver::async_resolve_https`, the same lookups as asynchronous operations that take any
 completion token. With ``use_awaitable``, what goes wrong is thrown:
 
@@ -233,8 +234,8 @@ Cancellation
    <https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542>`__ here. CMake warns
    about it.
 
-On Boost.Asio
-^^^^^^^^^^^^^
+On Asio
+^^^^^^^
 
 Any type of cancellation will do. ``cancel_after()`` gives a lookup a deadline, and it takes a
 timer here:
@@ -251,7 +252,7 @@ A ``cancellation_signal`` does it when told:
    :start-after: // [cancel-signal]
    :end-before: // [cancel-signal-end]
 
-On corosio
+On Corosio
 ^^^^^^^^^^
 
 What cancels a lookup is the ``std::stop_token`` of the coroutine that awaits it:
@@ -278,7 +279,7 @@ never called from there but handed to its executor.
 
 That includes destroying a resolver with lookups pending. They complete with
 :cpp:var:`errors::canceled`, after the destructor has returned, so the context has to run once more
-for them to. On corosio, a context destroyed instead unwinds them without a result; a lookup that a
+for them to. On Corosio, a context destroyed instead unwinds them without a result; a lookup that a
 coroutine awaits on a resolver in its own frame is out of its reach, see :ref:`corosio-constraints`.
 
 A resolver stays where it was made, and can be neither copied nor moved. :doc:`design` says what
@@ -295,7 +296,7 @@ strand and call it from inside that strand:
    :start-after: // [strand]
    :end-before: // [strand-end]
 
-This is tested on Boost.Asio. On corosio a resolver on a ``capy::strand`` should stay on it, but
+This is tested on Asio. On Corosio a resolver on a ``capy::strand`` should stay on it, but
 nothing here runs it that way yet.
 
 Pseudo code for looking up many names

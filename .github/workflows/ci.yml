@@ -1,6 +1,6 @@
 #
-# Builds the library and runs its tests, once for every preset in CMakePresets.json. The corosio
-# presets fetch capy and corosio at the commits CMakeLists.txt pins, so those two jobs need
+# Builds the library and runs its tests, once for every preset in CMakePresets.json. The Corosio
+# presets fetch Capy and Corosio at the commits CMakeLists.txt pins, so those two jobs need
 # github.com -- the tests themselves still need no network.
 #
 # The jobs run in the image that the devcontainer is built from, so what passes in the
