@@ -12,7 +12,7 @@
 #include <boost/capy/continuation.hpp>
 #include <boost/capy/error.hpp>
 #include <boost/capy/ex/any_executor.hpp>
-#include <boost/capy/ex/io_env.hpp>
+#include <boost/capy/ex/await_context.hpp>
 #include <boost/capy/task.hpp>
 #include <boost/corosio/endpoint.hpp>
 #include <boost/corosio/ip_address.hpp>
@@ -102,7 +102,7 @@ template <typename... Args>
 struct completion_state
 {
    boost::capy::continuation continuation;
-   const boost::capy::io_env* env = nullptr;
+   const boost::capy::await_context* env = nullptr;
    std::optional<std::tuple<error_code, Args...>> result;
    std::optional<std::stop_callback<std::function<void()>>> on_stop;
    bool starting = false; // the operation is being started, see initiation::await_suspend()
@@ -240,9 +240,11 @@ public:
 
    bool await_ready() const noexcept { return false; }
 
-   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h, const boost::capy::io_env* env)
+   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h,
+                                         const boost::capy::await_context* env)
    {
       state_.continuation.h = h;
+      state_.continuation.owner = env->owner;
       state_.env = env;
       if (env->stop_token.stop_requested())
       {

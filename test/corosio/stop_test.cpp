@@ -10,9 +10,13 @@
 
 #include <boost/capy/error.hpp>
 #include <boost/capy/ex/run.hpp>
+#include <boost/capy/ex/run_async.hpp>
+#include <boost/corosio/delay.hpp>
+#include <boost/corosio/io_context.hpp>
 #include <boost/corosio/timeout.hpp>
 
 #include <chrono>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -62,13 +66,13 @@ TEST_F(Corosio, YieldsTheErrorAndTheResultAsATuple)
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
 }
 
-TEST_F(Corosio, YieldsAnIoResultThatCorosioTakes)
+TEST_F(Corosio, YieldsResultsThatCorosioTakes)
 {
    //
-   // capy::io_result<T> is std::tuple<std::error_code, T>, so what a lookup yields is what
+   // capy::results<T> is std::tuple<std::error_code, T>, so what a lookup yields is what
    // corosio::timeout() and capy::when_all() take -- no adapter in between.
    //
-   static_assert(boost::corosio::detail::is_io_result_v<std::tuple<error_code, results_type>>,
+   static_assert(boost::corosio::detail::is_results_v<std::tuple<error_code, results_type>>,
                  "resolve() has to yield something corosio's composite operations can be given");
 }
 
@@ -133,7 +137,7 @@ TEST_F(Stop, GivesUpWhenCorosioTimesTheLookupOut)
    server.set_silent(true);
 
    //
-   // What a lookup yields is an io_result, so corosio::timeout() takes it as it is -- this is
+   // What a lookup yields is capy::results, so corosio::timeout() takes it as it is -- this is
    // what cancel_after() is on the other runtime. The code is corosio's own: the deadline
    // cancels the lookup and reports the timeout in its place.
    //
@@ -204,4 +208,81 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
    context.restart();
    context.run_for(std::chrono::milliseconds(200));
    EXPECT_TRUE(context.stopped()) << "something of the resolver is still waiting";
+}
+
+// --------------------------------------------------------------------------------------------------
+
+//
+// Destroying a context unwinds the coroutines still suspended on it: nothing is resumed, and their
+// frames are destroyed. It takes what parks a coroutine to carry the owner of its chain. These run
+// on a context of their own, as what they are after is what is left once it is gone.
+//
+class Teardown : public Corosio
+{
+protected:
+   void SetUp() override
+   {
+      Corosio::SetUp();
+      server.set_silent(true);
+   }
+
+   static void launch(boost::corosio::io_context& context, Task<void> task)
+   {
+      boost::capy::run_async(
+         cares_async::Executor(context.get_executor()), []() noexcept {},
+         [](std::exception_ptr) noexcept {})(std::move(task));
+   }
+
+   static Task<void> lookup(cares_async::resolver& resolver, std::shared_ptr<int>, bool& resumed)
+   {
+      std::ignore = co_await resolver.resolve("www.example.test", "443");
+      resumed = true;
+   }
+};
+
+TEST_F(Teardown, UnwindsALookupWhoseResolverWentFirst)
+{
+   auto held = std::make_shared<int>();
+   const std::weak_ptr<int> frame = held;
+   bool resumed = false;
+   {
+      boost::corosio::io_context other;
+      {
+         cares_async::resolver doomed{cares_async::Executor(other.get_executor())};
+         ASSERT_FALSE(doomed.set_servers(server.address()));
+
+         launch(other, lookup(doomed, std::move(held), resumed));
+         other.run_for(std::chrono::milliseconds(50));
+      }
+   }
+
+   EXPECT_TRUE(frame.expired());
+   EXPECT_FALSE(resumed);
+}
+
+TEST_F(Teardown, UnwindsAResolverInAFrameAndTheLookupItHeld)
+{
+   auto outer_held = std::make_shared<int>();
+   auto inner_held = std::make_shared<int>();
+   const std::weak_ptr<int> outer = outer_held;
+   const std::weak_ptr<int> inner = inner_held;
+   bool resumed = false;
+   {
+      boost::corosio::io_context other;
+      launch(other,
+             [](boost::corosio::io_context& other, std::string address, std::shared_ptr<int>,
+                std::shared_ptr<int> inner_held, bool& resumed) -> Task<void> {
+                cares_async::resolver owned{cares_async::Executor(other.get_executor())};
+                EXPECT_FALSE(owned.set_servers(address));
+
+                launch(other, lookup(owned, std::move(inner_held), resumed));
+                std::ignore = co_await boost::corosio::delay(std::chrono::seconds(60));
+                resumed = true;
+             }(other, server.address(), std::move(outer_held), std::move(inner_held), resumed));
+      other.run_for(std::chrono::milliseconds(50));
+   }
+
+   EXPECT_TRUE(outer.expired());
+   EXPECT_TRUE(inner.expired());
+   EXPECT_FALSE(resumed);
 }

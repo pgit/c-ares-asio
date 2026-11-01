@@ -101,12 +101,12 @@ elseif (CARES_ASYNC_API STREQUAL "COROSIO")
     FetchContent_Declare(
         capy
         GIT_REPOSITORY https://github.com/cppalliance/capy.git
-        GIT_TAG a372a6b054261f29497ac0d19c2a9533f9eaad40
+        GIT_TAG 24c54af2cf967ccbf8d3809af4bcd9c8f61f553b
         EXCLUDE_FROM_ALL)
     FetchContent_Declare(
         corosio
         GIT_REPOSITORY https://github.com/cppalliance/corosio.git
-        GIT_TAG a80ce002fd8cb27c893e50146990dc66d96cac02
+        GIT_TAG 41d0de18b6e4fa1b397c38a866f2daf52c6c36b5
         EXCLUDE_FROM_ALL)
     FetchContent_MakeAvailable(capy corosio)
     message(STATUS "cares_async: using I/O runtime capy/corosio")

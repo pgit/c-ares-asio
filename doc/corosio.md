@@ -34,8 +34,8 @@ auto [ec, endpoints] = co_await resolver.resolve("example.com", "443");
 ```
 
 That is what the shared tests are written in. On Boost.Asio it is `async_resolve()` with
-`as_tuple(use_awaitable)` behind it; on corosio it is a `capy::io_task`, since
-`capy::io_result<T>` *is* `std::tuple<std::error_code, T>` -- so a lookup goes into
+`as_tuple(use_awaitable)` behind it; on corosio it is a `capy::task`, since
+`capy::results<T>` *is* `std::tuple<std::error_code, T>` -- so a lookup goes into
 `corosio::timeout()` and `capy::when_all()` as it is, with nothing in between.
 
 ## Where the code is
@@ -106,11 +106,16 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
 
 ## Constraints
 
-* **A capy context has to run dry.** Destroying a `corosio::io_context` with a coroutine still
-  suspended on it leaks that coroutine's frame -- unlike ASIO, capy cannot unwind it. Destroying a
-  resolver hands its cancelled waits and its timer back to the context, so the context has to run
-  once more, which is what the tests do (`build-corosio-asan/` is where LeakSanitizer says so).
-  That is the same rule as for the completions: a lookup is not finished until the context ran.
+* **A context does not have to run dry.** Destroying a `corosio::io_context` unwinds the
+  coroutines still suspended on it, which includes what a resolver cancelled on its way out: their
+  frames are destroyed, and nothing is resumed or delivered. Whatever parks a coroutine therefore
+  carries the owner of its chain in its `capy::continuation`, without which this leaks
+  (`build-corosio-asan/` is where LeakSanitizer says so). The resolver still has to go before its
+  context, like any I/O object of corosio's.
+* **A lookup is held by its resolver, not by the context.** So teardown cannot reach a coroutine
+  that owns its resolver and is suspended in a lookup of that very resolver, directly or through
+  `corosio::timeout()`: the frame holds the resolver, which holds the frame, and it leaks. ASIO
+  leaks there, too. Stop such a lookup, or keep the resolver out of the frame.
 * **`corosio::io_context::poll()` does not ask the reactor.** It runs what is ready already; a
   socket that became readable in the meantime is not noticed. Stepping such a context by hand
   takes `run_one_for()`, see [`test/corosio/event_loop_fixture.hpp`](../test/corosio/event_loop_fixture.hpp).
@@ -132,7 +137,7 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
 
 * Threads. A resolver is for one thread at a time in either runtime, and where the ASIO build has
   a strand test (`async_test.cpp`), the COROSIO one has none: `capy::strand` exists and corosio
-  resumes a coroutine through the executor of its `io_env`, so a resolver on a strand should stay
+  resumes a coroutine through the executor of its `await_context`, so a resolver on a strand should stay
   on it, but nothing here runs it that way yet.
 * Moving the pins. Both libraries are pre-release and change their API on `develop` without
   notice, so moving a pin is a commit of its own.

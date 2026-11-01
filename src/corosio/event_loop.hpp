@@ -11,7 +11,7 @@
 
 #include <boost/capy/cond.hpp>
 #include <boost/capy/continuation.hpp>
-#include <boost/capy/ex/io_env.hpp>
+#include <boost/capy/ex/await_context.hpp>
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/capy/ex/this_coro.hpp>
 #include <boost/corosio/delay.hpp>
@@ -63,9 +63,11 @@ struct yield_now
    boost::capy::continuation continuation;
 
    bool await_ready() const noexcept { return false; }
-   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h, const boost::capy::io_env* env)
+   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h,
+                                         const boost::capy::await_context* env)
    {
       continuation.h = h;
+      continuation.owner = env->owner;
       env->executor.post(continuation);
       return std::noop_coroutine();
    }

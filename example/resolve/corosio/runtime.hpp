@@ -15,7 +15,8 @@
 #include <boost/capy/error.hpp>
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/capy/ex/this_coro.hpp>
-#include <boost/capy/io_task.hpp>
+#include <boost/capy/results.hpp>
+#include <boost/capy/task.hpp>
 #include <boost/capy/when_all.hpp>
 #include <boost/corosio/io_context.hpp>
 #include <boost/corosio/ip_address.hpp>
@@ -85,18 +86,18 @@ inline void run_main(Context& context, cares_async::Task<void> task, bool verbos
 }
 
 //
-// capy::when_all() takes a range of operations that yield an io_result, so every task is wrapped
+// capy::when_all() takes a range of operations that yield capy::results, so every task is wrapped
 // in one that yields an empty one. A stop request reaches all of them, as it is the token of the
 // coroutine awaiting here that they run with.
 //
 inline cares_async::Task<void> when_all(std::vector<cares_async::Task<void>> tasks)
 {
-   const auto wrap = [](cares_async::Task<void> task) -> boost::capy::io_task<> {
+   const auto wrap = [](cares_async::Task<void> task) -> cares_async::Task<boost::capy::results<>> {
       co_await std::move(task);
-      co_return boost::capy::io_result<>{};
+      co_return boost::capy::results<>{};
    };
 
-   std::vector<boost::capy::io_task<>> operations;
+   std::vector<cares_async::Task<boost::capy::results<>>> operations;
    operations.reserve(tasks.size());
    for (auto& task : tasks)
       operations.push_back(wrap(std::move(task)));

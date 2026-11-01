@@ -191,9 +191,6 @@ source tree -- which is what keeps the two CMake snippets above true.
   executor a strand and start the lookups from inside it.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is
   destroyed with lookups pending: they complete as cancelled, but not from inside the destructor.
-  On corosio the context has to run once more for a second reason, too: it is where the cancelled
-  waits of the resolver end, and a capy context that is destroyed with a coroutine still suspended
-  on it leaks that coroutine.
 * **The library does not log.** What it would have logged goes to the function given to
   `resolver::set_logger()`, which is where the reason for a failed TLS handshake is to be found.
 * **There is no promise of a stable interface before 1.0.** The minor version is part of the name

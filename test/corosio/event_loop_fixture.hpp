@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -51,19 +52,6 @@ inline void PrintTo(const endpoint& ep, std::ostream* os)
 class event_loop_fixture : public testing::Test
 {
 protected:
-   //
-   // A capy context has to run dry: destroying it with a coroutine still suspended on it leaks
-   // the coroutine's frame, which LeakSanitizer finds. By the time this runs, the resolver of the
-   // test is gone (it is a member of the fixture that derives from this one), so what is left is
-   // the waits and timers it cancelled on its way out.
-   //
-   ~event_loop_fixture() override
-   {
-      context.restart();
-      while (context.run_one_for(std::chrono::milliseconds(1)) > 0)
-         ;
-   }
-
    cares_async::Executor executor() { return cares_async::Executor(context.get_executor()); }
 
    boost::asio::any_io_executor server_executor() { return server_context.get_executor(); }
@@ -132,7 +120,11 @@ protected:
 
    static cares_async::Endpoint endpoint(std::string_view address, unsigned short port)
    {
-      return {boost::corosio::ip_address(address), port};
+      auto [ec, parsed] = boost::corosio::make_ip_address(address);
+      if (ec)
+         throw std::system_error(ec, "make_ip_address");
+
+      return {parsed, port};
    }
 
    //
