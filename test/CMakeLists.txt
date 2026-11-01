@@ -18,37 +18,57 @@ FetchContent_MakeAvailable(googletest)
 # The tests ask a DNS server of their own on the loopback interface, see fake_dns_server.hpp, so
 # they need no network and say the same wherever they run.
 #
+# Most of them are written in the spelling that both runtimes have (resolver::resolve(), see
+# resolver_fixture.hpp) and are built on either. What is about one runtime only -- completion
+# tokens here, stop tokens there -- is in asio/ or corosio/, next to the event loop fixture of
+# that runtime, and only the one of this build is compiled. The fake DNS server is Boost.Asio's
+# in both.
+#
 add_executable(
-    cares_asio_tests
-    async_test.cpp
+    cares_async_tests
     error_test.cpp
+    event_loop_fixture.hpp
     fake_dns_server.cpp
     fake_dns_server.hpp
     https_test.cpp
     resolver_fixture.hpp
     resolver_test.cpp
-    run.hpp
     server_list_test.cpp
     test_certificate.cpp
     test_certificate.hpp
     tls_test.cpp)
 
+if (CARES_ASYNC_COROSIO)
+    target_sources(cares_async_tests PRIVATE corosio/event_loop_fixture.hpp corosio/stop_test.cpp)
+else()
+    target_sources(cares_async_tests PRIVATE asio/async_test.cpp asio/event_loop_fixture.hpp
+                                            asio/run.hpp)
+endif()
+
 #
 # What is not part of the interface is not exported from a shared library either, so the one
 # internal piece with tests of its own is compiled into them.
 #
-target_sources(cares_asio_tests PRIVATE ../src/server_list.cpp)
-target_include_directories(cares_asio_tests PRIVATE ../src)
+target_sources(cares_async_tests PRIVATE ../src/server_list.cpp)
+target_include_directories(cares_async_tests PRIVATE ../src)
 
-target_compile_definitions(cares_asio_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
+target_compile_definitions(cares_async_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
+
+#
+# The fake DNS server is written in Boost.Asio whichever runtime the library was built on, so the
+# tests of a COROSIO build need Boost as well -- the library itself does not.
+#
+if (CARES_ASYNC_COROSIO)
+    find_package(Boost ${CARES_ASYNC_BOOST_VERSION} REQUIRED)
+endif()
 
 # the fake server speaks TLS as well, with the same library the resolver was built against
 target_link_libraries(
-    cares_asio_tests PRIVATE cares_asio::cares_asio GTest::gmock GTest::gtest_main
-                             ${cares_asio_tls_libraries} Threads::Threads)
+    cares_async_tests PRIVATE cares_async::cares_async Boost::headers GTest::gmock GTest::gtest_main
+                             ${cares_async_tls_libraries} Threads::Threads)
 
 include(GoogleTest)
-gtest_discover_tests(cares_asio_tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 120)
+gtest_discover_tests(cares_async_tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 120)
 
 # --------------------------------------------------------------------------------------------------
 
@@ -59,6 +79,6 @@ add_test(NAME headers.self_contained
          COMMAND "${CMAKE_COMMAND}" --build "${PROJECT_BINARY_DIR}" --config $<CONFIG> --target
                  all_verify_interface_header_sets)
 
-if (CARES_ASIO_INSTALL)
+if (CARES_ASYNC_INSTALL)
     include(cmake_test.cmake)
 endif()

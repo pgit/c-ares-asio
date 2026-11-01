@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/vscode-remote/devcontainer.json or this file's README at:
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.134.0/containers/cpp
 {
-	"name": "c-ares-asio",
+	"name": "c-ares-async",
 	"build": {
 		"dockerfile": "Dockerfile",
 		"args": { }
@@ -16,13 +16,41 @@
 					"--clang-tidy",
 					"--pch-storage=disk",
 					"--background-index",
-					"--compile-commands-dir=build"
+					"--compile-commands-dir=${command:cmake.buildDirectory}"
 				],
 				"C_Cpp.intelliSenseEngine": "disabled",
 				"lldb.showDisassembly": "never",
 				"[cpp]": {
 					"editor.defaultFormatter": "xaver.clang-format"
-			   }
+			   },
+				"cmake.ctest.testExplorerIntegrationEnabled": false,
+				"cSpell.ignorePaths": [
+					"build*",
+					".git/{info,lfs,logs,refs,objects}/**",
+					".git/{index,*refs,*HEAD}",
+					".vscode",
+					".vscode-insiders"
+				],
+				"files.exclude": {
+					"gtest-parallel-logs": true,
+					".cache": true
+				},
+				"search.exclude": {
+					"gtest-parallel-logs": true,
+					".cache": true
+				},
+				"testMate.cpp.test.parallelExecutionLimit": 20,
+				"testMate.cpp.test.advancedExecutables": [
+					{
+						"pattern": "${command:cmake.buildDirectory}/test/cares_async_tests",
+						"runTask": {
+							"before": [
+								"CMake: build"
+							]
+						},
+						"parallelizationLimit": 20
+					}
+				]
 			},
 
 			// Add the IDs of extensions you want installed when the container is created.
@@ -36,7 +64,8 @@
 				"vadimcn.vscode-lldb",
 				"xaver.clang-format",
 				"github.vscode-github-actions",
-				"anthropic.claude-code"
+				"anthropic.claude-code",
+				"matepek.vscode-catch2-test-adapter"
 			]
 		}
 	},

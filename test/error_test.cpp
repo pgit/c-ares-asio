@@ -1,17 +1,17 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include <cares_asio/error.hpp>
-
-#include <boost/system/errc.hpp>
-#include <boost/system/system_error.hpp>
+#include <cares_async/error.hpp>
 
 #include <ares.h>
 
 #include <gtest/gtest.h>
 
-using cares_asio::ares_category;
-using cares_asio::make_ares_error;
+#include <system_error>
+
+using cares_async::ares_category;
+using cares_async::make_ares_error;
+using cares_async::make_system_error;
 
 TEST(Error, CategoryHasAName) { EXPECT_STREQ(ares_category().name(), "c-ares"); }
 
@@ -46,13 +46,12 @@ TEST(Error, IsNoSystemError)
    // The values overlap with errno -- ARES_ENODATA is 1, and so is EPERM -- which is what the
    // category is there to tell apart.
    //
-   EXPECT_NE(make_ares_error(ARES_ENODATA),
-             boost::system::error_code(ARES_ENODATA, boost::system::system_category()));
-   EXPECT_NE(make_ares_error(ARES_ENODATA), boost::system::errc::operation_not_permitted);
+   EXPECT_NE(make_ares_error(ARES_ENODATA), make_system_error(ARES_ENODATA));
+   EXPECT_NE(make_ares_error(ARES_ENODATA), std::errc::operation_not_permitted);
 }
 
 TEST(Error, TravelsInAnException)
 {
-   const boost::system::system_error error(make_ares_error(ARES_ESERVFAIL), "lookup");
+   const cares_async::system_error error(make_ares_error(ARES_ESERVFAIL), "lookup");
    EXPECT_EQ(error.code(), make_ares_error(ARES_ESERVFAIL));
 }

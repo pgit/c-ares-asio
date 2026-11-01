@@ -30,10 +30,11 @@ env:
 jobs:
   build:
     name: reference
-    runs-on: ubuntu-latest
+    # pinned like in ci.yml, bump it deliberately
+    runs-on: &runs_on ubuntu-26.04
 
     container:
-      image: docker.io/psedoc/anyhttp:0.30
+      image: docker.io/psedoc/anyhttp:0.31
       options: --user root
 
     steps:
@@ -62,7 +63,7 @@ jobs:
     name: publish
     if: github.event_name != 'pull_request'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: *runs_on
 
     permissions:
       pages: write

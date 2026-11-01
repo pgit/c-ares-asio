@@ -7,12 +7,11 @@
 //
 #include "resolver_fixture.hpp"
 
-#include <boost/asio/deferred.hpp>
-#include <boost/asio/experimental/parallel_group.hpp>
+#include <optional>
+#include <tuple>
 
-using namespace boost::asio;
-using boost::system::error_code;
-using cares_asio::make_ares_error;
+using cares_async::error_code;
+using cares_async::make_ares_error;
 using testing::AnyOf;
 using testing::ElementsAre;
 using testing::IsEmpty;
@@ -101,7 +100,7 @@ TEST_F(Https, ResolvesEveryRecordOfAName)
    ASSERT_EQ(records.size(), 2u);
 
    // a record set has no order to rely on
-   std::ranges::sort(records, {}, &cares_asio::https_record::priority);
+   std::ranges::sort(records, {}, &cares_async::https_record::priority);
    EXPECT_THAT(records[0].params, ElementsAre("alpn=h3"));
    EXPECT_EQ(records[1].target, "fallback.example.test");
    EXPECT_THAT(records[1].params, ElementsAre("alpn=h2"));
@@ -152,11 +151,21 @@ TEST_F(Https, GoesOutTogetherWithTheAddresses)
    server.add_address("www.example.test", "192.0.2.1");
    server.add_https("www.example.test", 1, ".", {{ARES_SVCB_PARAM_ALPN, {2, 'h', '3'}}});
 
-   const auto [order, ec, endpoints, https_ec, records] = run(
-      context,
-      experimental::make_parallel_group(resolver.async_resolve("www.example.test", "443", deferred),
-                                        resolver.async_resolve_https("www.example.test", deferred))
-         .async_wait(experimental::wait_for_all(), use_awaitable));
+   std::optional<std::tuple<error_code, cares_async::resolver::results_type>> addresses;
+   std::optional<std::tuple<error_code, cares_async::resolver::https_results_type>> https;
+
+   start([](cares_async::resolver& resolver, auto& addresses) -> cares_async::Task<void> {
+      addresses = co_await resolver.resolve("www.example.test", "443");
+   }(resolver, addresses));
+
+   start([](cares_async::resolver& resolver, auto& https) -> cares_async::Task<void> {
+      https = co_await resolver.resolve_https("www.example.test");
+   }(resolver, https));
+
+   ASSERT_TRUE(run_until([&] { return addresses && https; }));
+
+   const auto& [ec, endpoints] = *addresses;
+   const auto& [https_ec, records] = *https;
 
    EXPECT_FALSE(ec) << ec.message();
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));

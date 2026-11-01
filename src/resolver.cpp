@@ -1,38 +1,35 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include <cares_asio/resolver.hpp>
+#include <cares_async/resolver.hpp>
 
+#include "event_loop.hpp"
 #include "log.hpp"
 #include "server_list.hpp"
+#include "socket_functions.hpp"
 #include "tls_transport.hpp"
-
-#include <boost/asio/append.hpp>
-#include <boost/asio/associated_cancellation_slot.hpp>
-#include <boost/asio/error.hpp>
-#include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/system/system_error.hpp>
 
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include <array>
 #include <chrono>
 #include <cstring>
+#include <exception>
 #include <format>
+#include <memory>
 #include <optional>
+#include <tuple>
+#include <utility>
 
-using namespace boost::asio;
-using boost::system::error_code;
-
-namespace cares_asio
+namespace cares_async
 {
 
 // --------------------------------------------------------------------------------------------------
 
-const boost::system::error_category& ares_category() noexcept
+const error_category& ares_category() noexcept
 {
-   static const struct Category : boost::system::error_category
+   static const struct Category : error_category
    {
       const char* name() const noexcept override { return "c-ares"; }
       std::string message(int value) const override { return ares_strerror(value); }
@@ -41,7 +38,7 @@ const boost::system::error_category& ares_category() noexcept
    return category;
 }
 
-boost::system::error_code make_ares_error(int status) noexcept
+error_code make_ares_error(int status) noexcept
 {
    return {status, ares_category()}; // ARES_SUCCESS is 0, so this stays falsy on success
 }
@@ -49,29 +46,21 @@ boost::system::error_code make_ares_error(int status) noexcept
 // --------------------------------------------------------------------------------------------------
 
 //
-// One socket c-ares has opened. ASIO is only used to wait for readiness on it -- the socket itself
-// belongs to c-ares, which is why the descriptor is released again instead of being closed.
+// One socket c-ares has opened. The event loop is only used to wait for readiness on it -- the
+// socket itself belongs to c-ares, which is why the descriptor is detached again, never closed.
 //
 struct resolver::socket_watch
 {
-   socket_watch(const any_io_executor& executor, ares_socket_t fd)
-      : fd(fd), descriptor(executor, fd)
-   {
-   }
-   ~socket_watch() { detach(); }
+   socket_watch(const Executor& executor, ares_socket_t fd) : fd(fd), descriptor(executor, fd) {}
 
-   void detach()
-   {
-      if (descriptor.is_open())
-         descriptor.release(); // cancels pending waits, leaves the file descriptor alone
-   }
+   void detach() { descriptor.detach(); }
 
    ares_socket_t fd;
-   posix::stream_descriptor descriptor;
+   detail::Descriptor descriptor;
 
    bool want_read = false; // what c-ares is interested in
    bool want_write = false; //
-   bool waiting_read = false; // what we have handed to ASIO
+   bool waiting_read = false; // what we have handed to the event loop
    bool waiting_write = false; //
 
    // what the TLS handshake is interested in, which overrides c-ares until there is a session
@@ -88,9 +77,9 @@ namespace
 //
 struct resolve_request
 {
-   any_io_executor executor;
+   Executor executor;
    const log_function& logger;
-   resolver::resolve_handler handler;
+   detail::Completion<resolver::resolve_signature> handler;
 };
 
 //
@@ -98,9 +87,9 @@ struct resolve_request
 //
 struct https_request
 {
-   any_io_executor executor;
+   Executor executor;
    const log_function& logger;
-   resolver::https_handler handler;
+   detail::Completion<resolver::https_signature> handler;
 };
 
 //
@@ -166,11 +155,11 @@ std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
       std::string result;
       for (size_t i = 0; i + 4 <= length; i += 4)
       {
-         ip::address_v4::bytes_type bytes;
+         std::array<unsigned char, 4> bytes;
          std::memcpy(bytes.data(), value + i, bytes.size());
          if (!result.empty())
             result += ',';
-         result += ip::address_v4(bytes).to_string();
+         result += detail::address_text(bytes);
       }
 
       return result;
@@ -181,11 +170,11 @@ std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
       std::string result;
       for (size_t i = 0; i + 16 <= length; i += 16)
       {
-         ip::address_v6::bytes_type bytes;
+         std::array<unsigned char, 16> bytes;
          std::memcpy(bytes.data(), value + i, bytes.size());
          if (!result.empty())
             result += ',';
-         result += ip::address_v6(bytes).to_string();
+         result += detail::address_text(bytes);
       }
 
       return result;
@@ -235,11 +224,10 @@ void https_callback(void* arg, ares_status_t status, size_t timeouts,
                      ares_strerror(static_cast<int>(status)), timeouts);
 
    const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
-                      ? error_code(error::operation_aborted)
+                      ? errors::canceled
                       : make_ares_error(static_cast<int>(status));
 
-   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
-      slot.clear();
+   detail::clear_on_cancel(request->handler);
 
    resolver::https_results_type records;
    if (dnsrec && status == ARES_SUCCESS)
@@ -269,32 +257,7 @@ void https_callback(void* arg, ares_status_t status, size_t timeouts,
       }
    }
 
-   post(request->executor, append(std::move(request->handler), ec, std::move(records)));
-}
-
-std::optional<ip::tcp::endpoint> to_endpoint(const ares_addrinfo_node& node)
-{
-   if (node.ai_family == AF_INET && node.ai_addrlen >= sizeof(sockaddr_in))
-   {
-      sockaddr_in sa{};
-      std::memcpy(&sa, node.ai_addr, sizeof(sa));
-
-      ip::address_v4::bytes_type bytes;
-      std::memcpy(bytes.data(), &sa.sin_addr, bytes.size());
-      return ip::tcp::endpoint(ip::address_v4(bytes), ntohs(sa.sin_port));
-   }
-
-   if (node.ai_family == AF_INET6 && node.ai_addrlen >= sizeof(sockaddr_in6))
-   {
-      sockaddr_in6 sa{};
-      std::memcpy(&sa, node.ai_addr, sizeof(sa));
-
-      ip::address_v6::bytes_type bytes;
-      std::memcpy(bytes.data(), &sa.sin6_addr, bytes.size());
-      return ip::tcp::endpoint(ip::address_v6(bytes, sa.sin6_scope_id), ntohs(sa.sin6_port));
-   }
-
-   return std::nullopt;
+   detail::complete_later(std::move(request->handler), request->executor, ec, std::move(records));
 }
 
 void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
@@ -304,21 +267,20 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
                      timeouts);
 
    //
-   // Report the c-ares way of being cancelled as the ASIO one, so that the operation behaves like
-   // any other cancelled ASIO operation.
+   // Report the c-ares way of being cancelled as the runtime's own, so that the operation behaves
+   // like any other cancelled operation of it.
    //
    const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
-                      ? error_code(error::operation_aborted)
+                      ? errors::canceled
                       : make_ares_error(status);
 
-   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
-      slot.clear();
+   detail::clear_on_cancel(request->handler);
 
    resolver::results_type endpoints;
    if (result)
    {
       for (const auto* node = result->nodes; node; node = node->ai_next)
-         if (auto endpoint = to_endpoint(*node))
+         if (auto endpoint = detail::make_endpoint(node->ai_addr, node->ai_addrlen))
             endpoints.push_back(*endpoint);
 
       ares_freeaddrinfo(result);
@@ -326,9 +288,10 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
 
    //
    // c-ares calls us from inside ares_getaddrinfo() or ares_process_fds(), which may well be a
-   // synchronous completion -- post to stay clear of the "never invoke the handler inline" rule.
+   // synchronous completion -- complete later to stay clear of the "never invoke the handler
+   // inline" rule.
    //
-   post(request->executor, append(std::move(request->handler), ec, std::move(endpoints)));
+   detail::complete_later(std::move(request->handler), request->executor, ec, std::move(endpoints));
 }
 
 } // namespace
@@ -336,10 +299,10 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
 // --------------------------------------------------------------------------------------------------
 
 resolver::resolver(executor_type executor, const tls_options& tls)
-   : m_executor(std::move(executor)), m_timer(std::make_shared<steady_timer>(m_executor))
+   : m_executor(std::move(executor)), m_timer(std::make_unique<detail::Timer>(m_executor))
 {
    if (int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
-      throw boost::system::system_error(make_ares_error(status), "ares_library_init");
+      throw system_error(make_ares_error(status), "ares_library_init");
 
    //
    // The socket state callback is what makes this work without c-ares' own event thread: it tells
@@ -369,7 +332,7 @@ resolver::resolver(executor_type executor, const tls_options& tls)
    try
    {
       if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
-         throw boost::system::system_error(make_ares_error(status), "ares_init_options");
+         throw system_error(make_ares_error(status), "ares_init_options");
 
       if (tls.enabled)
       {
@@ -381,8 +344,17 @@ resolver::resolver(executor_type executor, const tls_options& tls)
          // found in /etc/resolv.conf are. Port 853 is where the same servers would.
          //
          if (auto status = detail::set_port(m_channel, 853); status != ARES_SUCCESS)
-            throw boost::system::system_error(make_ares_error(static_cast<int>(status)),
-                                              "ares_set_servers_csv");
+            throw system_error(make_ares_error(static_cast<int>(status)), "ares_set_servers_csv");
+      }
+      else
+      {
+         //
+         // Also before the channel has opened anything. There is one thing these are here for:
+         // they turn TCP fast open down, see socket_functions.hpp.
+         //
+         if (auto status = detail::install_socket_functions(m_channel); status != ARES_SUCCESS)
+            throw system_error(make_ares_error(static_cast<int>(status)),
+                               "ares_set_socket_functions_ex");
       }
    }
    catch (...)
@@ -395,7 +367,7 @@ resolver::resolver(executor_type executor, const tls_options& tls)
    }
 }
 
-boost::system::error_code resolver::set_servers(std::string_view servers)
+error_code resolver::set_servers(std::string_view servers)
 {
    //
    // For DNS over TLS the port to assume is 853, where the list does not name one. A port that
@@ -421,17 +393,39 @@ resolver::~resolver()
 
 // --------------------------------------------------------------------------------------------------
 
-void resolver::start_resolve(std::string host, std::string service, resolve_handler handler)
+//
+// The one spelling of the operations that both runtimes have. On corosio it is all there is; on
+// Boost.Asio initiate() is a deferred operation with the handler of a completion token behind it,
+// so neither runtime pays for a front end it does not use.
+//
+Task<std::tuple<error_code, resolver::results_type>> resolver::resolve(std::string host,
+                                                                       std::string service)
+{
+   co_return co_await detail::initiate<resolve_signature>(
+      [&](detail::Completion<resolve_signature> handler) {
+         start_resolve(std::move(host), std::move(service), std::move(handler));
+      });
+}
+
+Task<std::tuple<error_code, resolver::https_results_type>> resolver::resolve_https(std::string host)
+{
+   co_return co_await detail::initiate<https_signature>(
+      [&](detail::Completion<https_signature> handler) {
+         start_resolve_https(std::move(host), std::move(handler));
+      });
+}
+
+// --------------------------------------------------------------------------------------------------
+
+void resolver::start_resolve(std::string host, std::string service,
+                             detail::Completion<resolve_signature> handler)
 {
    //
    // There is no handle for an individual ares_getaddrinfo() request, so cancelling one takes the
    // whole channel with it -- every other lookup in flight included. Good enough while the only
    // thing that ever cancels is the one that stops everything.
    //
-   if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
-      slot.assign([this](cancellation_type) { //
-         ares_cancel(m_channel);
-      });
+   detail::on_cancel(handler, [this] { ares_cancel(m_channel); });
 
    auto request = std::make_unique<resolve_request>(m_executor, m_logger, std::move(handler));
 
@@ -446,12 +440,9 @@ void resolver::start_resolve(std::string host, std::string service, resolve_hand
    update_timeout();
 }
 
-void resolver::start_resolve_https(std::string host, https_handler handler)
+void resolver::start_resolve_https(std::string host, detail::Completion<https_signature> handler)
 {
-   if (auto slot = get_associated_cancellation_slot(handler); slot.is_connected())
-      slot.assign([this](cancellation_type) { //
-         ares_cancel(m_channel);
-      });
+   detail::on_cancel(handler, [this] { ares_cancel(m_channel); });
 
    auto request = std::make_unique<https_request>(m_executor, m_logger, std::move(handler));
 
@@ -491,11 +482,10 @@ void resolver::start_resolve_https(std::string host, https_handler handler)
    // function, not anything the name could have done.
    //
    detail::log_error(m_logger, "HTTPS query for {}: {}", host, ares_strerror(status));
-   if (auto slot = get_associated_cancellation_slot(request->handler); slot.is_connected())
-      slot.clear();
+   detail::clear_on_cancel(request->handler);
 
-   post(m_executor,
-        append(std::move(request->handler), make_ares_error(status), https_results_type()));
+   detail::complete_later(std::move(request->handler), m_executor, make_ares_error(status),
+                          https_results_type());
 }
 
 // --------------------------------------------------------------------------------------------------
@@ -526,7 +516,23 @@ void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
 
    auto& socket = m_sockets[fd];
    if (!socket)
-      socket = std::make_shared<socket_watch>(m_executor, fd);
+   {
+      //
+      // We are a callback of c-ares', called from inside one of its own functions, and an
+      // exception has no way through that: a socket we cannot watch leaves its query to time out
+      // instead, which is the same thing that happens to a query whose answer never comes.
+      //
+      try
+      {
+         socket = std::make_shared<socket_watch>(m_executor, fd);
+      }
+      catch (const std::exception& error)
+      {
+         detail::log_error(m_logger, "fd={} cannot be watched: {}", fd, error.what());
+         m_sockets.erase(fd);
+         return;
+      }
+   }
 
    socket->want_read = readable;
    socket->want_write = writable;
@@ -560,21 +566,21 @@ void resolver::arm(const std::shared_ptr<socket_watch>& socket)
    if (want_read && !socket->waiting_read)
    {
       socket->waiting_read = true;
-      socket->descriptor.async_wait(posix::stream_descriptor::wait_read,
-                                    [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       if (const auto socket = weak.lock())
-                                          on_socket_event(socket, ARES_FD_EVENT_READ, ec);
-                                    });
+      socket->descriptor.wait(detail::wait_type::read,
+                              [this, weak = std::weak_ptr(socket)](const error_code& ec) {
+                                 if (const auto socket = weak.lock())
+                                    on_socket_event(socket, ARES_FD_EVENT_READ, ec);
+                              });
    }
 
    if (want_write && !socket->waiting_write)
    {
       socket->waiting_write = true;
-      socket->descriptor.async_wait(posix::stream_descriptor::wait_write,
-                                    [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                       if (const auto socket = weak.lock())
-                                          on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
-                                    });
+      socket->descriptor.wait(detail::wait_type::write,
+                              [this, weak = std::weak_ptr(socket)](const error_code& ec) {
+                                 if (const auto socket = weak.lock())
+                                    on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
+                              });
    }
 }
 
@@ -584,7 +590,19 @@ void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsi
    (event == ARES_FD_EVENT_READ ? socket->waiting_read : socket->waiting_write) = false;
 
    if (ec)
-      return; // operation_aborted, i.e. the descriptor was detached underneath us
+      return; // cancelled, i.e. the descriptor was detached underneath us
+
+   //
+   // c-ares may have lost interest in this direction while we were waiting for it: a socket that
+   // has just sent its query is writable all the time, so a wait for writability that was armed
+   // for the connect is ready right away, and the socket state callback has said "read only"
+   // since. Handing that readiness to c-ares anyway makes it drop the connection.
+   //
+   if (!(event == ARES_FD_EVENT_READ ? socket->want_read : socket->want_write))
+   {
+      arm(socket);
+      return;
+   }
 
    //
    // Get the TCP connect and the TLS handshake out of the way first -- c-ares is only ever shown
@@ -602,7 +620,7 @@ void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsi
 
    //
    // ares_process_fds() takes an array, and processing several sockets in one call is cheaper than
-   // one call per socket -- with one ASIO completion handler per descriptor, we get one at a time.
+   // one call per socket -- with one completion per descriptor, we get one at a time.
    //
    const ares_fd_events_t events{socket->fd, event};
    ares_process_fds(m_channel, &events, 1, ARES_PROCESS_FLAG_NONE);
@@ -627,21 +645,19 @@ void resolver::update_timeout()
    }
 
    using namespace std::chrono;
-   m_timer->expires_after(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
+   const auto delay =
+      duration_cast<steady_clock::duration>(seconds(tv.tv_sec) + microseconds(tv.tv_usec));
 
    //
-   // Cancelling the timer does nothing for a wait that has completed already and only has its
-   // handler left to run, and the resolver may be gone before that happens. The timer goes with
-   // it, which is what the handler looks at before anything else.
+   // A timer that has expired already, with only its callback left to run, is not called back
+   // once it has been re-armed or cancelled -- nor after the resolver, and the timer with it, is
+   // gone.
    //
-   m_timer->async_wait([this, weak = std::weak_ptr(m_timer)](const error_code& ec) {
-      if (ec || weak.expired())
-         return; // superseded by a later timeout, cancelled, or left behind by the resolver
-
+   m_timer->arm(delay, [this] {
       detail::log_debug(m_logger, "query timeout");
       ares_process_fds(m_channel, nullptr, 0, ARES_PROCESS_FLAG_NONE);
       update_timeout();
    });
 }
 
-} // namespace cares_asio
+} // namespace cares_async

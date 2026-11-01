@@ -15,7 +15,7 @@
 //
 #pragma once
 
-#include <cares_asio/resolver.hpp>
+#include <cares_async/resolver.hpp>
 
 #include <ares.h>
 
@@ -24,7 +24,7 @@
 #include <map>
 #include <memory>
 
-namespace cares_asio::detail
+namespace cares_async::detail
 {
 
 class tls_transport
@@ -89,4 +89,4 @@ private:
    std::map<ares_socket_t, std::unique_ptr<tls_session>> m_sessions;
 };
 
-} // namespace cares_asio::detail
+} // namespace cares_async::detail

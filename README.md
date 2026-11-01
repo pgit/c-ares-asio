@@ -1,11 +1,11 @@
-# cares_asio
+# cares_async
 
-[c-ares](https://c-ares.org/) name resolution as
-[Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) asynchronous
-operations.
+[c-ares](https://c-ares.org/) name resolution as asynchronous operations, on
+[Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) or on
+capy/corosio.
 
 ASIO's own `ip::tcp::resolver` runs `getaddrinfo()` on an internal thread: one lookup at a time,
-blocking, and with addresses for an answer and nothing else. `cares_asio::resolver` has c-ares do
+blocking, and with addresses for an answer and nothing else. `cares_async::resolver` has c-ares do
 the asking instead, driven by the event loop of the application -- no thread of its own, any
 number of lookups in flight at once, and more to ask for than addresses:
 
@@ -17,10 +17,15 @@ number of lookups in flight at once, and more to ask for than addresses:
 * as operations that take any completion token -- `use_awaitable`, `deferred`, `use_future`, a
   callback -- and can be cancelled.
 
+The same library also builds on [capy](https://github.com/cppalliance/capy)/[corosio](https://github.com/cppalliance/corosio)
+instead of Boost.Asio, where the operations are coroutines and nothing else. One build tree is one
+runtime or the other, `-DCARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.md)
+for what the two map to.
+
 ## Example
 
 ```cpp
-#include <cares_asio.hpp>
+#include <cares_async.hpp>
 
 #include <boost/asio.hpp>
 
@@ -30,7 +35,7 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> lookup(std::string host)
 {
-   cares_asio::resolver resolver(co_await asio::this_coro::executor);
+   cares_async::resolver resolver(co_await asio::this_coro::executor);
 
    const auto [ec, endpoints] =
       co_await resolver.async_resolve(host, "443", asio::as_tuple(asio::use_awaitable));
@@ -50,9 +55,29 @@ int main()
 }
 ```
 
-[`example/minimal.cpp`](example/minimal.cpp) goes on to the HTTPS record, and
-[`example/resolve`](example/resolve) is a command line with everything else: many names at once,
-DNS over TLS, cancellation.
+Both runtimes have the same operation as a coroutine, which yields the error and the result as a
+tuple -- `resolve()` and `resolve_https()`. On corosio that is all there is, and the program around
+it is capy's:
+
+```cpp
+cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
+{
+   cares_async::resolver resolver(executor);
+
+   const auto [ec, endpoints] = co_await resolver.resolve(host, "443");
+
+   if (ec)
+      std::cerr << host << ": " << ec.message() << '\n';
+
+   for (const auto& endpoint : endpoints)
+      std::cout << host << ": " << endpoint.address() << ':' << endpoint.port() << '\n';
+}
+```
+
+[`example/asio/minimal.cpp`](example/asio/minimal.cpp) and
+[`example/corosio/minimal.cpp`](example/corosio/minimal.cpp) are these two, going on to the HTTPS
+record, and [`example/resolve`](example/resolve) is a command line with everything else: many
+names at once, DNS over TLS, cancellation.
 
 ## Requirements
 
@@ -60,7 +85,9 @@ DNS over TLS, cancellation.
 * A C++20 compiler and standard library. clang 23 with libc++ and GCC 14 with libstdc++ are the
   ones the tests run with.
 * CMake 3.25 or later.
-* [Boost](https://www.boost.org/) 1.88 or later, of which only headers are used.
+* [Boost](https://www.boost.org/) 1.88 or later, of which only headers are used. A COROSIO build
+  needs no Boost at all: capy and corosio are fetched at pinned commits and built along with the
+  library.
 * [c-ares](https://c-ares.org/) 1.34 or later. Make that 1.34.7 where lookups get cancelled: up
   to there, `ares_cancel()` can run into
   [GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542),
@@ -73,9 +100,9 @@ DNS over TLS, cancellation.
 With the library installed, `find_package()` brings the target and everything it depends on:
 
 ```cmake
-find_package(cares_asio 0.1 REQUIRED)
+find_package(cares_async 0.1 REQUIRED)
 
-target_link_libraries(app PRIVATE cares_asio::cares_asio)
+target_link_libraries(app PRIVATE cares_async::cares_async)
 ```
 
 The target has the same name where the sources are part of the build instead, through
@@ -85,12 +112,12 @@ The target has the same name where the sources are part of the build instead, th
 include(FetchContent)
 
 FetchContent_Declare(
-    cares_asio
-    GIT_REPOSITORY https://github.com/pgit/c-ares-asio.git
+    cares_async
+    GIT_REPOSITORY https://github.com/pgit/c-ares-async.git
     GIT_TAG <tag or commit>)
-FetchContent_MakeAvailable(cares_asio)
+FetchContent_MakeAvailable(cares_async)
 
-target_link_libraries(app PRIVATE cares_asio::cares_asio)
+target_link_libraries(app PRIVATE cares_async::cares_async)
 ```
 
 Either way the target asks for C++20 and brings the include paths of Boost and c-ares with it,
@@ -99,12 +126,13 @@ sight: no header of the library includes one of its.
 
 | Option | Default | |
 | --- | --- | --- |
-| `CARES_ASIO_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
+| `CARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.md](doc/corosio.md). |
+| `CARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
 | `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
-| `CARES_ASIO_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
-| `CARES_ASIO_BUILD_EXAMPLES` | top-level only | Builds the examples. |
-| `CARES_ASIO_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
-| `CARES_ASIO_INSTALL` | top-level only | Generates the install rules. |
+| `CARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
+| `CARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
+| `CARES_ASYNC_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
+| `CARES_ASYNC_INSTALL` | top-level only | Generates the install rules. Off, and refused, in a COROSIO build. |
 
 ## Building, testing, installing
 
@@ -126,6 +154,8 @@ ctest --preset dev
 | `tsan` | `build-tsan` | With the thread sanitizer. |
 | `openssl` | `build-openssl` | OpenSSL instead of AWS-LC, and the library as a shared one. |
 | `gcc` | `build-gcc` | GCC and libstdc++. |
+| `corosio` | `build-corosio` | On capy/corosio instead of Boost.Asio. |
+| `corosio-asan` | `build-corosio-asan` | The same, with the address and undefined behaviour sanitizers. |
 
 Anywhere else it is a CMake project like any other:
 
@@ -144,26 +174,30 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 ## Documentation
 
-* The reference is made from the comments in [`include/cares_asio`](include/cares_asio) by
+* The reference is made from the comments in [`include/cares_async`](include/cares_async) by
   [MrDocs](https://www.mrdocs.com): `cmake --build build --target docs`, see [doc](doc/README.md).
-* [How the integration works](doc/design.md): c-ares in an ASIO event loop.
+* [How the integration works](doc/design.md): c-ares in an event loop.
+* [The corosio runtime](doc/corosio.md): the second runtime, and what porting to it found.
 * [HTTPS records](doc/https-records.md)
 * [DNS over TLS](doc/dns-over-tls.md)
 
 ## Good to know
 
 * **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
-  what a cancellation slot can do is `ares_cancel()`, for the whole resolver. Every pending
-  operation then completes with `operation_aborted`.
+  what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
+  then completes with `cares_async::errors::canceled` -- `operation_aborted` on Boost.Asio,
+  `capy::error::canceled` on corosio.
 * **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
   executor a strand and start the lookups from inside it.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is
-  destroyed with lookups pending: they complete with `operation_aborted`, but not from inside
-  the destructor.
+  destroyed with lookups pending: they complete as cancelled, but not from inside the destructor.
+  On corosio the context has to run once more for a second reason, too: it is where the cancelled
+  waits of the resolver end, and a capy context that is destroyed with a coroutine still suspended
+  on it leaks that coroutine.
 * **The library does not log.** What it would have logged goes to the function given to
   `resolver::set_logger()`, which is where the reason for a failed TLS handshake is to be found.
 * **There is no promise of a stable interface before 1.0.** The minor version is part of the name
-  of the shared library until then, and `find_package(cares_asio 0.1)` does not accept 0.2.
+  of the shared library until then, and `find_package(cares_async 0.1)` does not accept 0.2.
 
 ## License
 

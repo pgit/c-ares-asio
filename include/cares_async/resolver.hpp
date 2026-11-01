@@ -2,26 +2,19 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// Minimal integration of c-ares into an ASIO event loop.
+// Minimal integration of c-ares into an event loop.
 //
 // c-ares is told about nothing but its own sockets: it hands them to us through its socket state
-// callback, we wrap each of them in a (non-owning) ASIO descriptor and feed readiness back into
-// the library using ares_process_fds().
+// callback, we wait for readiness on each of them the way the runtime waits for anything, and
+// c-ares is told when one of them is ready, using ares_process_fds().
 //
 // https://c-ares.org/docs/ares_process_fds.html
 //
 #pragma once
 
-#include <cares_asio/error.hpp>
-#include <cares_asio/export.hpp>
-
-#include <boost/asio/any_completion_handler.hpp>
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/async_result.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/system/error_code.hpp>
-#include <boost/system/system_error.hpp>
+#include <cares_async/error.hpp>
+#include <cares_async/export.hpp>
+#include <cares_async/runtime.hpp>
 
 #include <ares.h>
 
@@ -30,15 +23,21 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
-namespace cares_asio
+#if CARES_ASYNC_ASIO
+#include <boost/asio/async_result.hpp>
+#endif
+
+namespace cares_async
 {
 
 namespace detail
 {
+class Timer;
 class tls_transport;
-}
+} // namespace detail
 
 // --------------------------------------------------------------------------------------------------
 
@@ -49,7 +48,7 @@ class tls_transport;
     alias, where @ref target names the host to go on with, and with any other
     it describes a service, where @ref params says how to reach it.
 
-    @see resolver::async_resolve_https
+    @see resolver::resolve_https
  */
 struct https_record
 {
@@ -142,16 +141,25 @@ using log_function = std::function<void(log_level, std::string_view)>;
 
 // --------------------------------------------------------------------------------------------------
 
-/** Resolves host names with c-ares, as ASIO asynchronous operations.
+/** Resolves host names with c-ares, as asynchronous operations of the
+    runtime the library was built on.
 
     A resolver has one c-ares channel and drives it from the executor it was
     given. There is no thread behind it and nothing blocks: c-ares says which
-    sockets it wants watched, the resolver waits for them the way ASIO waits
-    for anything, and c-ares is told when one of them is ready.
+    sockets it wants watched, the resolver waits for them the way the runtime
+    waits for anything, and c-ares is told when one of them is ready.
 
     Any number of operations may be pending at a time. c-ares keeps the
     queries apart, over UDP as well as on the one connection that TCP or TLS
     take.
+
+    @par The two runtimes
+    Both lookups come as a coroutine, @ref resolve and @ref resolve_https,
+    which is the spelling that an `CARES_ASYNC_ASIO` and an
+    `CARES_ASYNC_COROSIO` build have in common: it yields the error and the
+    result as a tuple. On Boost.Asio there is also @ref async_resolve and
+    @ref async_resolve_https, which take any completion token. See
+    `doc/corosio.md`.
 
     @par Thread safety
     Distinct objects: safe. Shared objects: unsafe. Where the context runs on
@@ -159,56 +167,65 @@ using log_function = std::function<void(log_level, std::string_view)>;
     the resolver from inside that strand.
 
     @par Cancellation
-    Both operations can be cancelled, by any type of cancellation, and then
-    complete with `boost::asio::error::operation_aborted`. But c-ares has no
-    handle for a single request, so cancelling one operation cancels every
-    operation that is pending on the resolver.
+    Both operations can be cancelled -- by any type of cancellation on
+    Boost.Asio, by the `std::stop_token` of the awaiting coroutine on
+    corosio -- and then complete with @ref errors::canceled. But c-ares has
+    no handle for a single request, so cancelling one operation cancels
+    every operation that is pending on the resolver.
 
     @par Lifetime
     Destroying the resolver completes what is pending with
-    `boost::asio::error::operation_aborted` as well. The handlers are not
-    called from the destructor but handed to their executors, so the context
-    has to run once more for them to be.
+    @ref errors::canceled as well. The completions are not called from the
+    destructor but handed to their executors, so the context has to run once
+    more for them to be.
 
     @par Example
     @code
     boost::asio::awaitable<void> lookup(std::string host)
     {
-       cares_asio::resolver resolver(co_await boost::asio::this_coro::executor);
+       cares_async::resolver resolver(co_await boost::asio::this_coro::executor);
 
        for (const auto& endpoint :
             co_await resolver.async_resolve(host, "443", boost::asio::use_awaitable))
           std::cout << endpoint << '\n';
     }
     @endcode
+
+    The same on either runtime, where the error is wanted rather than an
+    exception:
+
+    @code
+    cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
+    {
+       cares_async::resolver resolver(executor);
+
+       auto [ec, endpoints] = co_await resolver.resolve(host, "443");
+       for (const auto& endpoint : endpoints)
+          std::cout << endpoint << '\n';
+    }
+    @endcode
  */
-class CARES_ASIO_EXPORT resolver
+class CARES_ASYNC_EXPORT resolver
 {
 public:
    /** The type of the executor that a resolver runs on. */
-   using executor_type = boost::asio::any_io_executor;
+   using executor_type = Executor;
 
-   /** What @ref async_resolve comes back with: the endpoints of the host,
-       best first.
+   /** What @ref resolve comes back with: the endpoints of the host, best
+       first.
     */
-   using results_type = std::vector<boost::asio::ip::tcp::endpoint>;
+   using results_type = std::vector<Endpoint>;
 
-   /** The completion signature of @ref async_resolve. */
-   using resolve_signature = void(boost::system::error_code, results_type);
+   /** The completion signature of @ref resolve. */
+   using resolve_signature = void(error_code, results_type);
 
-   /** A completion handler of @ref async_resolve, whatever its type. */
-   using resolve_handler = boost::asio::any_completion_handler<resolve_signature>;
-
-   /** What @ref async_resolve_https comes back with: the records of the
-       host, in no particular order.
+   /** What @ref resolve_https comes back with: the records of the host, in
+       no particular order.
     */
    using https_results_type = std::vector<https_record>;
 
-   /** The completion signature of @ref async_resolve_https. */
-   using https_signature = void(boost::system::error_code, https_results_type);
-
-   /** A completion handler of @ref async_resolve_https, whatever its type. */
-   using https_handler = boost::asio::any_completion_handler<https_signature>;
+   /** The completion signature of @ref resolve_https. */
+   using https_signature = void(error_code, https_results_type);
 
    /** Makes a resolver that runs on `executor`.
 
@@ -225,19 +242,26 @@ public:
        @param tls Whether to use DNS over TLS, and how.
 
        @par Exceptions
-       `boost::system::system_error` where c-ares cannot be set up, with its
-       status code as @ref make_ares_error makes it, and `std::runtime_error`
-       where the TLS library cannot.
+       @ref system_error where c-ares cannot be set up, with its status code
+       as @ref make_ares_error makes it, and `std::runtime_error` where the
+       TLS library cannot.
     */
    explicit resolver(executor_type executor, const tls_options& tls = {});
 
-   /** Completes every pending operation with
-       `boost::asio::error::operation_aborted` and closes the sockets.
+   /** Completes every pending operation with @ref errors::canceled and
+       closes the sockets.
     */
    ~resolver();
 
+   //
+   // A resolver stays where it was made: a moved-from one would still be the 'this' that the
+   // socket state callback of its channel points at. Spelled out rather than left out, so that
+   // whoever tries it reads it here.
+   //
    resolver(const resolver&) = delete;
    resolver& operator=(const resolver&) = delete;
+   resolver(resolver&&) = delete;
+   resolver& operator=(resolver&&) = delete;
 
    /** Returns the executor that the resolver was made with.
 
@@ -261,7 +285,7 @@ public:
        @return An error if the list cannot be made sense of, in which case
        the resolver keeps the servers it had.
     */
-   boost::system::error_code set_servers(std::string_view servers);
+   error_code set_servers(std::string_view servers);
 
    /** Has `logger` called with every message from here on.
 
@@ -282,22 +306,66 @@ public:
        the one to try first in front. An address in place of the name is
        taken as it is, without a query.
 
-       @par Completion signature
-       @code
-       void(boost::system::error_code, results_type)
-       @endcode
+       This is the coroutine spelling, which both runtimes have: it yields
+       the error and the endpoints as a tuple, the way the completion token
+       `as_tuple(use_awaitable)` does on Boost.Asio.
 
        @par Errors
        Any of the c-ares status codes, as @ref make_ares_error makes them --
        `ARES_ENOTFOUND` for a name that does not exist and `ARES_ETIMEOUT`
-       for servers that do not answer among them -- or
-       `boost::asio::error::operation_aborted`.
+       for servers that do not answer among them -- or @ref errors::canceled.
 
        @param host The name to resolve, or an address.
 
        @param service The port of every endpoint, by its number or by the
        name it has in `/etc/services`. Empty for port 0, which is also what a
        name that is not in there comes to -- that is no error.
+
+       @return The error and the endpoints.
+    */
+   Task<std::tuple<error_code, results_type>> resolve(std::string host, std::string service);
+
+   /** Resolves the HTTPS records (RFC 9460) of a host name.
+
+       Asks for the records of type HTTPS that `host` has, search domains and
+       all, the way @ref resolve asks for addresses. It is a question of its
+       own, so the two can be asked at the same time.
+
+       @par Errors
+       As for @ref resolve. A name that has no such record completes with
+       `ARES_ENODATA`, which is the common case rather than a problem.
+
+       @param host The name to resolve.
+
+       @return The error and the records.
+    */
+   Task<std::tuple<error_code, https_results_type>> resolve_https(std::string host);
+
+#if CARES_ASYNC_ASIO
+
+   /** A completion handler of @ref async_resolve, whatever its type. */
+   using resolve_handler = detail::Completion<resolve_signature>;
+
+   /** A completion handler of @ref async_resolve_https, whatever its type. */
+   using https_handler = detail::Completion<https_signature>;
+
+   /** Resolves a host name to the endpoints of a service, with a completion
+       token.
+
+       The same lookup as @ref resolve, as an ASIO asynchronous operation.
+       Boost.Asio only.
+
+       @par Completion signature
+       @code
+       void(boost::system::error_code, results_type)
+       @endcode
+
+       @par Errors
+       As for @ref resolve.
+
+       @param host The name to resolve, or an address.
+
+       @param service The port of every endpoint, as @ref resolve takes it.
 
        @param token The completion token: a callback,
        `boost::asio::use_awaitable`, `boost::asio::deferred` or any other.
@@ -315,11 +383,11 @@ public:
          token, std::string(host), std::string(service));
    }
 
-   /** Resolves the HTTPS records (RFC 9460) of a host name.
+   /** Resolves the HTTPS records (RFC 9460) of a host name, with a
+       completion token.
 
-       Asks for the records of type HTTPS that `host` has, search domains and
-       all, the way @ref async_resolve asks for addresses. It is a question
-       of its own, so the two can be asked at the same time.
+       The same lookup as @ref resolve_https, as an ASIO asynchronous
+       operation. Boost.Asio only.
 
        @par Completion signature
        @code
@@ -327,8 +395,7 @@ public:
        @endcode
 
        @par Errors
-       As for @ref async_resolve. A name that has no such record completes
-       with `ARES_ENODATA`, which is the common case rather than a problem.
+       As for @ref resolve_https.
 
        @param host The name to resolve.
 
@@ -348,27 +415,30 @@ public:
          token, std::string(host));
    }
 
+#endif // CARES_ASYNC_ASIO
+
 private:
    struct socket_watch;
 
-   void start_resolve(std::string host, std::string service, resolve_handler handler);
-   void start_resolve_https(std::string host, https_handler handler);
+   void start_resolve(std::string host, std::string service,
+                      detail::Completion<resolve_signature> handler);
+   void start_resolve_https(std::string host, detail::Completion<https_signature> handler);
 
    static void socket_state_callback(void* data, ares_socket_t fd, int readable, int writable);
    void on_socket_state(ares_socket_t fd, bool readable, bool writable);
 
    void arm(const std::shared_ptr<socket_watch>& socket);
    void on_socket_event(const std::shared_ptr<socket_watch>& socket, unsigned int event,
-                        const boost::system::error_code& ec);
+                        const error_code& ec);
 
    void update_timeout();
 
    executor_type m_executor;
-   std::shared_ptr<boost::asio::steady_timer> m_timer; // shared for update_timeout() to tell
+   std::unique_ptr<detail::Timer> m_timer;
    ares_channel_t* m_channel = nullptr;
    log_function m_logger; // declared ahead of the transport, which keeps a reference to it
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 
-} // namespace cares_asio
+} // namespace cares_async

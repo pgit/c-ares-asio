@@ -1,9 +1,14 @@
 #
-# Builds the library and runs its tests, once for every preset in CMakePresets.json.
+# Builds the library and runs its tests, once for every preset in CMakePresets.json. The corosio
+# presets fetch capy and corosio at the commits CMakeLists.txt pins, so those two jobs need
+# github.com -- the tests themselves still need no network.
 #
 # The jobs run in the image that the devcontainer is built from, so what passes in the
 # devcontainer passes here and the other way round. The tests need no network: they ask a DNS
 # server of their own, see test/fake_dns_server.hpp.
+#
+# The runner image is pinned rather than ubuntu-latest, like in anyhttp: everything else is pinned
+# down to the container, and the host is what is left to change under us. Bump it deliberately.
 #
 name: CI
 
@@ -23,10 +28,10 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.preset }}
-    runs-on: ubuntu-latest
+    runs-on: &runs_on ubuntu-26.04
 
     container:
-      image: docker.io/psedoc/anyhttp:0.30
+      image: docker.io/psedoc/anyhttp:0.31
       # root for the checkout to be writable, and the sanitizers need to switch off address
       # space randomization and to trace their own process
       options: --user root --cap-add SYS_PTRACE --security-opt seccomp=unconfined
@@ -34,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [dev, release, asan, tsan, openssl, gcc]
+        preset: [dev, release, asan, tsan, openssl, gcc, corosio, corosio-asan]
 
     steps:
       - uses: actions/checkout@v7
@@ -50,10 +55,10 @@ jobs:
 
   format:
     name: clang-format
-    runs-on: ubuntu-latest
+    runs-on: *runs_on
 
     container:
-      image: docker.io/psedoc/anyhttp:0.30
+      image: docker.io/psedoc/anyhttp:0.31
       options: --user root
 
     steps:

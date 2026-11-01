@@ -5,7 +5,7 @@
 // The operations as ASIO asynchronous operations: every kind of completion token, the executor a
 // handler runs on, cancellation, and what becomes of an operation whose resolver goes away.
 //
-#include "resolver_fixture.hpp"
+#include "../resolver_fixture.hpp"
 
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/bind_executor.hpp>
@@ -27,12 +27,12 @@
 
 using namespace boost::asio;
 using boost::system::error_code;
-using cares_asio::make_ares_error;
+using cares_async::make_ares_error;
 using testing::ElementsAre;
 using testing::IsEmpty;
 
-using results_type = cares_asio::resolver::results_type;
-using https_results_type = cares_asio::resolver::https_results_type;
+using results_type = cares_async::resolver::results_type;
+using https_results_type = cares_async::resolver::https_results_type;
 
 class Async : public resolver_fixture
 {
@@ -57,7 +57,7 @@ TEST_F(Async, CompletesACallback)
       endpoints = std::move(found);
    });
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_FALSE(*result) << result->message();
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
 }
@@ -66,9 +66,8 @@ TEST_F(Async, CompletesAFuture)
 {
    auto future = resolver.async_resolve("www.example.test", "443", use_future);
 
-   ASSERT_TRUE(run_until(context, [&] {
-      return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-   }));
+   ASSERT_TRUE(run_until(
+      [&] { return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }));
 
    EXPECT_THAT(future.get(), ElementsAre(endpoint("192.0.2.1", 443)));
 }
@@ -77,9 +76,8 @@ TEST_F(Async, FailsAFutureWithAnException)
 {
    auto future = resolver.async_resolve("nowhere.example.test", "443", use_future);
 
-   ASSERT_TRUE(run_until(context, [&] {
-      return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-   }));
+   ASSERT_TRUE(run_until(
+      [&] { return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }));
 
    try
    {
@@ -101,7 +99,7 @@ TEST_F(Async, CompletesACoroutine)
       co_return endpoints.size() + records.size();
    };
 
-   EXPECT_EQ(run(context, lookup()), 2u);
+   EXPECT_EQ(run(lookup()), 2u);
 }
 
 TEST_F(Async, StartsADeferredOperationOnlyWhenAskedTo)
@@ -114,7 +112,7 @@ TEST_F(Async, StartsADeferredOperationOnlyWhenAskedTo)
    std::optional<error_code> result;
    std::move(operation)([&](error_code ec, const results_type&) { result = ec; });
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_FALSE(*result) << result->message();
 }
 
@@ -137,7 +135,7 @@ TEST_F(Async, KeepsWhatADeferredOperationWasGiven)
       endpoints = std::move(found);
    });
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_FALSE(*result) << result->message();
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 8443)));
 }
@@ -158,7 +156,7 @@ TEST_F(Async, NeverCompletesFromInsideTheInitiatingFunction)
 
    EXPECT_EQ(completed, 0);
 
-   ASSERT_TRUE(run_until(context, [&] { return completed == 2; }));
+   ASSERT_TRUE(run_until([&] { return completed == 2; }));
 }
 
 TEST_F(Async, RunsTheHandlerOnItsOwnExecutor)
@@ -171,7 +169,7 @@ TEST_F(Async, RunsTheHandlerOnItsOwnExecutor)
                              in_strand = strand.running_in_this_thread();
                           }));
 
-   ASSERT_TRUE(run_until(context, [&] { return in_strand.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return in_strand.has_value(); }));
    EXPECT_TRUE(*in_strand);
 }
 
@@ -182,7 +180,7 @@ TEST_F(Async, KeepsTheContextRunningUntilItIsDone)
    // answer is in, and must return once it is.
    //
    io_context other;
-   cares_asio::resolver lone(other.get_executor());
+   cares_async::resolver lone(other.get_executor());
 
    std::optional<error_code> result;
    lone.async_resolve("192.0.2.7", "443", [&](error_code ec, const results_type&) { result = ec; });
@@ -207,7 +205,7 @@ TEST(Strand, ServesAContextThatRunsOnSeveralThreads)
       server.add_address(std::format("host{}.example.test", i), std::format("192.0.2.{}", i));
 
    const auto strand = make_strand(context);
-   std::optional<cares_asio::resolver> resolver(std::in_place, strand);
+   std::optional<cares_async::resolver> resolver(std::in_place, strand);
    ASSERT_FALSE(resolver->set_servers(server.address()));
 
    const auto lookups = [&]() -> awaitable<int> {
@@ -256,13 +254,13 @@ TEST_F(Cancellation, CompletesWithOperationAborted)
       bind_cancellation_slot(signal.slot(),
                              [&](error_code ec, const results_type&) { result = ec; }));
 
-   ASSERT_TRUE(run_until(context, [&] { return !server.queries().empty(); }));
+   ASSERT_TRUE(run_until([&] { return !server.queries().empty(); }));
    EXPECT_FALSE(result.has_value());
 
    signal.emit(cancellation_type::terminal);
    EXPECT_FALSE(result.has_value()) << "the handler has to wait for its turn here as well";
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_EQ(*result, error::operation_aborted);
 }
 
@@ -277,10 +275,10 @@ TEST_F(Cancellation, CancelsAnHttpsLookup)
       bind_cancellation_slot(signal.slot(),
                              [&](error_code ec, const https_results_type&) { result = ec; }));
 
-   ASSERT_TRUE(run_until(context, [&] { return !server.queries().empty(); }));
+   ASSERT_TRUE(run_until([&] { return !server.queries().empty(); }));
    signal.emit(cancellation_type::terminal);
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_EQ(*result, error::operation_aborted);
 }
 
@@ -301,10 +299,10 @@ TEST_F(Cancellation, TakesEveryPendingOperationWithIt)
    resolver.async_resolve("other.example.test", "443",
                           [&](error_code ec, const results_type&) { bystander = ec; });
 
-   ASSERT_TRUE(run_until(context, [&] { return server.queries().size() >= 2; }));
+   ASSERT_TRUE(run_until([&] { return server.queries().size() >= 2; }));
    signal.emit(cancellation_type::terminal);
 
-   ASSERT_TRUE(run_until(context, [&] { return cancelled && bystander; }));
+   ASSERT_TRUE(run_until([&] { return cancelled && bystander; }));
    EXPECT_EQ(*cancelled, error::operation_aborted);
    EXPECT_EQ(*bystander, error::operation_aborted);
 }
@@ -320,9 +318,9 @@ TEST_F(Cancellation, LeavesTheResolverInWorkingOrder)
       bind_cancellation_slot(signal.slot(),
                              [&](error_code ec, const results_type&) { result = ec; }));
 
-   ASSERT_TRUE(run_until(context, [&] { return !server.queries().empty(); }));
+   ASSERT_TRUE(run_until([&] { return !server.queries().empty(); }));
    signal.emit(cancellation_type::terminal);
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
 
    server.set_silent(false);
    const auto [ec, endpoints] = resolve("www.example.test");
@@ -339,7 +337,7 @@ TEST_F(Cancellation, IsNothingToAnOperationThatIsDone)
       bind_cancellation_slot(signal.slot(),
                              [&](error_code ec, const results_type&) { result = ec; }));
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_FALSE(*result) << result->message();
 
    //
@@ -363,7 +361,7 @@ TEST_F(Cancellation, IsNothingOnceTheResolverIsGone)
    cancellation_signal answered, failed, pending;
    int completed = 0;
    {
-      auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+      auto doomed = std::make_unique<cares_async::resolver>(context.get_executor());
       ASSERT_FALSE(doomed->set_servers(server.address()));
 
       doomed->async_resolve(
@@ -375,7 +373,7 @@ TEST_F(Cancellation, IsNothingOnceTheResolverIsGone)
          bind_cancellation_slot(failed.slot(),
                                 [&](error_code, const https_results_type&) { ++completed; }));
 
-      ASSERT_TRUE(run_until(context, [&] { return completed == 2; }));
+      ASSERT_TRUE(run_until([&] { return completed == 2; }));
 
       server.set_silent(true);
       doomed->async_resolve(
@@ -384,7 +382,7 @@ TEST_F(Cancellation, IsNothingOnceTheResolverIsGone)
                                 [&](error_code, const results_type&) { ++completed; }));
    }
 
-   ASSERT_TRUE(run_until(context, [&] { return completed == 3; }));
+   ASSERT_TRUE(run_until([&] { return completed == 3; }));
 
    answered.emit(cancellation_type::terminal);
    failed.emit(cancellation_type::terminal);
@@ -402,7 +400,7 @@ TEST_F(Lifetime, CompletesWhatIsPendingWhenTheResolverGoes)
 
    std::optional<error_code> result, https_result;
    {
-      cares_asio::resolver doomed(context.get_executor());
+      cares_async::resolver doomed(context.get_executor());
       ASSERT_FALSE(doomed.set_servers(server.address()));
 
       doomed.async_resolve("www.example.test", "443",
@@ -410,12 +408,12 @@ TEST_F(Lifetime, CompletesWhatIsPendingWhenTheResolverGoes)
       doomed.async_resolve_https(
          "www.example.test", [&](error_code ec, const https_results_type&) { https_result = ec; });
 
-      ASSERT_TRUE(run_until(context, [&] { return server.queries().size() >= 2; }));
+      ASSERT_TRUE(run_until([&] { return server.queries().size() >= 2; }));
    }
 
    EXPECT_FALSE(result.has_value()) << "not from inside the destructor";
 
-   ASSERT_TRUE(run_until(context, [&] { return result && https_result; }));
+   ASSERT_TRUE(run_until([&] { return result && https_result; }));
    EXPECT_EQ(*result, error::operation_aborted);
    EXPECT_EQ(*https_result, error::operation_aborted);
 }
@@ -432,15 +430,15 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
 
    std::optional<error_code> result;
    {
-      cares_asio::resolver doomed(other.get_executor());
+      cares_async::resolver doomed(other.get_executor());
       ASSERT_FALSE(doomed.set_servers(silent.address()));
       doomed.async_resolve("www.example.test", "443",
                            [&](error_code ec, const results_type&) { result = ec; });
 
-      ASSERT_TRUE(run_until(other, [&] { return !silent.queries().empty(); }));
+      ASSERT_TRUE(::run_until(other, [&] { return !silent.queries().empty(); }));
    }
 
-   ASSERT_TRUE(run_until(other, [&] { return result.has_value(); }));
+   ASSERT_TRUE(::run_until(other, [&] { return result.has_value(); }));
    EXPECT_EQ(*result, error::operation_aborted);
 }
 
@@ -457,7 +455,7 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
    // memory that was given back.
    //
    ASSERT_EQ(::setenv("RES_OPTIONS", "timeout:1 attempts:1", 1), 0);
-   auto doomed = std::make_unique<cares_asio::resolver>(context.get_executor());
+   auto doomed = std::make_unique<cares_async::resolver>(context.get_executor());
    ASSERT_EQ(::unsetenv("RES_OPTIONS"), 0);
 
    ASSERT_FALSE(doomed->set_servers(server.address()));
@@ -472,7 +470,7 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
 
    std::this_thread::sleep_for(std::chrono::milliseconds(1300));
 
-   ASSERT_TRUE(run_until(context, [&] { return result.has_value(); }));
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
    EXPECT_EQ(*result, error::operation_aborted);
    EXPECT_EQ(doomed, nullptr);
 
@@ -481,6 +479,6 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
 
 TEST_F(Lifetime, CanGoWithNothingEverAsked)
 {
-   cares_asio::resolver unused(context.get_executor());
+   cares_async::resolver unused(context.get_executor());
    context.poll();
 }

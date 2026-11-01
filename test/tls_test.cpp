@@ -6,20 +6,23 @@
 //
 #include "resolver_fixture.hpp"
 
-#include <boost/asio/deferred.hpp>
-#include <boost/asio/experimental/parallel_group.hpp>
-
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include <unistd.h>
 
-using namespace boost::asio;
-using boost::system::error_code;
-using cares_asio::log_level;
-using cares_asio::make_ares_error;
-using cares_asio::tls_options;
+using cares_async::error_code;
+using cares_async::log_level;
+using cares_async::make_ares_error;
+using cares_async::tls_options;
 using testing::Contains;
 using testing::ElementsAre;
 using testing::HasSubstr;
@@ -35,7 +38,7 @@ constexpr const char* server_name = "dns.example.test";
 
 } // namespace
 
-class DnsOverTls : public testing::Test
+class DnsOverTls : public event_loop_fixture
 {
 protected:
    void SetUp() override
@@ -62,7 +65,7 @@ protected:
    //
    void trust_the_server()
    {
-      trusted = testing::TempDir() + "cares_asio_test_" + std::to_string(::getpid()) + ".pem";
+      trusted = testing::TempDir() + "cares_async_test_" + std::to_string(::getpid()) + ".pem";
       std::ofstream(trusted) << certificate.certificate_pem;
       ASSERT_EQ(::setenv("SSL_CERT_FILE", trusted.c_str(), 1), 0);
    }
@@ -72,7 +75,7 @@ protected:
    //
    void make_resolver(const tls_options& tls)
    {
-      resolver.emplace(context.get_executor(), tls);
+      resolver = std::make_unique<cares_async::resolver>(executor(), tls);
       resolver->set_logger([this](log_level level, std::string_view message) {
          messages.emplace_back(level, message);
       });
@@ -80,22 +83,18 @@ protected:
       ASSERT_FALSE(resolver->set_servers(server.address()));
    }
 
-   auto resolve(std::string_view host)
-   {
-      return run(context, resolver->async_resolve(host, "443", awaited));
-   }
+   auto resolve(std::string_view host) { return run(resolver->resolve(std::string(host), "443")); }
 
-   static boost::asio::ip::tcp::endpoint endpoint(std::string_view address, unsigned short port)
-   {
-      return {boost::asio::ip::make_address(address), port};
-   }
-
-   static constexpr auto awaited = as_tuple(use_awaitable);
    static inline const test_certificate certificate = make_test_certificate(server_name);
 
-   io_context context;
-   fake_dns_server server{context.get_executor()};
-   std::optional<cares_asio::resolver> resolver;
+   fake_dns_server server{server_executor()};
+
+   //
+   // Held by pointer rather than in a std::optional, which asks whether a resolver converts to
+   // an executor -- a question capy's any_executor answers by failing to compile, see
+   // doc/corosio.md.
+   //
+   std::unique_ptr<cares_async::resolver> resolver;
 
    std::vector<std::pair<log_level, std::string>> messages;
    std::string trusted;
@@ -217,11 +216,25 @@ TEST_F(DnsOverTls, SendsAddressAndHttpsQueriesDownOneConnection)
 {
    make_resolver({.enabled = true, .hostname = {}, .verify = false});
 
-   const auto [order, ec, endpoints, https_ec, records] =
-      run(context, experimental::make_parallel_group(
-                      resolver->async_resolve("www.example.test", "443", deferred),
-                      resolver->async_resolve_https("www.example.test", deferred))
-                      .async_wait(experimental::wait_for_all(), use_awaitable));
+   //
+   // Both in flight at the same time, so that it is one connection carrying the two of them
+   // rather than one after the other.
+   //
+   std::optional<std::tuple<error_code, cares_async::resolver::results_type>> addresses;
+   std::optional<std::tuple<error_code, cares_async::resolver::https_results_type>> https;
+
+   start([](cares_async::resolver& resolver, auto& addresses) -> cares_async::Task<void> {
+      addresses = co_await resolver.resolve("www.example.test", "443");
+   }(*resolver, addresses));
+
+   start([](cares_async::resolver& resolver, auto& https) -> cares_async::Task<void> {
+      https = co_await resolver.resolve_https("www.example.test");
+   }(*resolver, https));
+
+   ASSERT_TRUE(run_until([&] { return addresses && https; }));
+
+   const auto& [ec, endpoints] = *addresses;
+   const auto& [https_ec, records] = *https;
 
    EXPECT_FALSE(ec) << ec.message();
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
@@ -263,7 +276,7 @@ TEST_F(DnsOverTls, ReportsAServerThatIsNotThere)
    //
    std::string nowhere;
    {
-      fake_dns_server gone(context.get_executor());
+      fake_dns_server gone(server_executor());
       nowhere = gone.address();
    }
    ASSERT_FALSE(resolver->set_servers(nowhere));

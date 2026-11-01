@@ -7,12 +7,12 @@
 //
 #pragma once
 
-#include <cares_asio/resolver.hpp>
+#include <cares_async/resolver.hpp>
 
 #include <format>
 #include <utility>
 
-namespace cares_asio::detail
+namespace cares_async::detail
 {
 
 //
@@ -44,4 +44,4 @@ void log_error(const log_function& logger, std::format_string<Args...> format, A
    log(logger, log_level::error, format, std::forward<Args>(args)...);
 }
 
-} // namespace cares_asio::detail
+} // namespace cares_async::detail

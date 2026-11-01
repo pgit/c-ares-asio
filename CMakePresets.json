@@ -30,7 +30,7 @@
             "hidden": true,
             "description": "AWS-LC as the TLS library, where the devcontainer has it",
             "cacheVariables": {
-                "CARES_ASIO_TLS": "AWS-LC",
+                "CARES_ASYNC_TLS": "AWS-LC",
                 "ssl_ROOT": "/opt/boringssl"
             }
         },
@@ -93,8 +93,36 @@
             "binaryDir": "${sourceDir}/build-openssl",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CARES_ASIO_TLS": "OpenSSL",
+                "CARES_ASYNC_TLS": "OpenSSL",
                 "BUILD_SHARED_LIBS": "ON"
+            }
+        },
+        {
+            "name": "corosio",
+            "displayName": "corosio",
+            "description": "The library on capy/corosio instead of Boost.Asio, in build-corosio/: coroutines only, and capy and corosio are fetched at the commits CMakeLists.txt pins",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-corosio",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CARES_ASYNC_API": "COROSIO"
+            }
+        },
+        {
+            "name": "corosio-asan",
+            "displayName": "corosio, AddressSanitizer + UBSan",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-corosio-asan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CARES_ASYNC_API": "COROSIO",
+                "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
             }
         },
         {
@@ -107,7 +135,7 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_COMPILER": "g++",
                 "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wno-missing-field-initializers",
-                "CARES_ASIO_TLS": "OpenSSL"
+                "CARES_ASYNC_TLS": "OpenSSL"
             }
         }
     ],
@@ -135,6 +163,14 @@
         {
             "name": "gcc",
             "configurePreset": "gcc"
+        },
+        {
+            "name": "corosio",
+            "configurePreset": "corosio"
+        },
+        {
+            "name": "corosio-asan",
+            "configurePreset": "corosio-asan"
         }
     ],
     "testPresets": [
@@ -173,6 +209,16 @@
         {
             "name": "gcc",
             "configurePreset": "gcc",
+            "inherits": "base"
+        },
+        {
+            "name": "corosio",
+            "configurePreset": "corosio",
+            "inherits": "base"
+        },
+        {
+            "name": "corosio-asan",
+            "configurePreset": "corosio-asan",
             "inherits": "base"
         }
     ]

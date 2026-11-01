@@ -6,6 +6,7 @@
 //
 #pragma once
 
-#include <cares_asio/error.hpp>
-#include <cares_asio/resolver.hpp>
-#include <cares_asio/version.hpp>
+#include <cares_async/error.hpp>
+#include <cares_async/resolver.hpp>
+#include <cares_async/runtime.hpp>
+#include <cares_async/version.hpp>
