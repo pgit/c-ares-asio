@@ -19,7 +19,7 @@ number of lookups in flight at once, and more to ask for than addresses:
 
 The same library also builds on [capy](https://github.com/cppalliance/capy)/[corosio](https://github.com/cppalliance/corosio)
 instead of Boost.Asio, where the operations are coroutines and nothing else. One build tree is one
-runtime or the other, `-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.md)
+runtime or the other, `-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.rst)
 for what the two map to.
 
 ## Example
@@ -126,12 +126,12 @@ sight: no header of the library includes one of its.
 
 | Option | Default | |
 | --- | --- | --- |
-| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.md](doc/corosio.md). |
+| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.rst](doc/corosio.rst). |
 | `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
 | `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
-| `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
+| `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |
 | `C_ARES_ASYNC_INSTALL` | top-level only | Generates the install rules. Off, and refused, in a COROSIO build. |
 
 ## Building, testing, installing
@@ -174,12 +174,17 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 ## Documentation
 
-* The reference is made from the comments in [`include/c_ares_async`](include/c_ares_async) by
-  [MrDocs](https://www.mrdocs.com): `cmake --build build --target docs`, see [doc](doc/README.md).
-* [How the integration works](doc/design.md): c-ares in an event loop.
-* [The corosio runtime](doc/corosio.md): the second runtime, and what porting to it found.
-* [HTTPS records](doc/https-records.md)
-* [DNS over TLS](doc/dns-over-tls.md)
+`cmake --build build --target docs` makes all of it into one site with
+[Sphinx](https://www.sphinx-doc.org), see [doc](doc/README.md):
+
+* [The programmer's guide](doc/programmers-guide.rst): what a program does with the library, step
+  by step and with code. This is the place to start.
+* [The API reference](doc/reference.rst), made from the comments in
+  [`include/c_ares_async`](include/c_ares_async) by [Doxygen](https://www.doxygen.nl).
+* [How the integration works](doc/design.rst): c-ares in an event loop.
+* [The corosio runtime](doc/corosio.rst): the second runtime, and what porting to it found.
+* [HTTPS records](doc/https-records.rst)
+* [DNS over TLS](doc/dns-over-tls.rst)
 
 ## Good to know
 

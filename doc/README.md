@@ -1,39 +1,43 @@
 # Documentation
 
-## Reference
+The documentation has two parts, and is made into one site:
 
-The reference is made by [MrDocs](https://www.mrdocs.com) from the comments in the public headers,
-[`include/c_ares_async/resolver.hpp`](../include/c_ares_async/resolver.hpp) and
-[`include/c_ares_async/error.hpp`](../include/c_ares_async/error.hpp), as HTML with a page per symbol:
+* the **guide**: the `.rst` files in here, written by hand. [`programmers-guide.rst`](programmers-guide.rst)
+  is the place to start, and the others are about how it all works. Its code is in
+  [`snippets.cpp`](snippets.cpp), which is compiled with every build.
+* the **reference**: [`reference.rst`](reference.rst) says what goes where, and the content comes
+  from the comments in the public headers in [`include/c_ares_async`](../include/c_ares_async).
+
+## Making it
 
 ```sh
-cmake --preset dev -DMRDOCS_EXECUTABLE=/path/to/mrdocs
+cmake --preset dev
 cmake --build build --target docs
 ```
 
-The pages end up in `build/doc/html`, with `index.html` to start from. MrDocs is a single program
-that the [releases](https://github.com/cppalliance/mrdocs/releases) have ready to run, and where it
-is on the `PATH` there is no need to say where. The target is not part of a regular build, not
-there at all where CMake finds no `mrdocs`, and not there in a COROSIO build -- the comments are
-the same in both, see [corosio.md](corosio.md).
+The pages end up in `build/doc/html`, with `index.html` to start from. It takes
+[Doxygen](https://www.doxygen.nl), [Sphinx](https://www.sphinx-doc.org),
+[Breathe](https://breathe.readthedocs.io) and the
+[Read the Docs theme](https://sphinx-rtd-theme.readthedocs.io), which the devcontainer has. On
+Debian that is:
 
-[`mrdocs.yml`](mrdocs.yml) is the configuration, which also has MrDocs warn about whatever is
-public but not documented. It reads a single source file, [`mrdocs.cpp`](mrdocs.cpp), that includes
-the library and nothing else.
+```sh
+apt-get install doxygen python3-sphinx python3-breathe python3-sphinx-rtd-theme
+```
 
-## How it works
+The target is not part of a regular build, and not there at all where CMake finds no `doxygen` or
+no `sphinx-build`. It can be made from a build on either runtime and gives the same result: the
+comments on the types of the two runtimes are in `asio/runtime.hpp`.
 
-* [How the integration works](design.md) -- c-ares in an event loop: sockets, timeouts,
-  completion, cancellation and what happens when a resolver goes away.
-* [The corosio runtime](corosio.md) -- the second runtime the library builds on, what it maps to
-  and what porting to it found.
-* [HTTPS records](https-records.md) -- the second kind of lookup, and what comes back from it.
-* [DNS over TLS](dns-over-tls.md) -- the transport that c-ares does not have.
+## Writing it
 
-## Examples
+Warnings are errors in both tools, so a public symbol without a comment, a parameter without a
+`@param` or a reference that goes nowhere fails the build, and with it a pull request.
 
-* [`example/asio/minimal.cpp`](../example/asio/minimal.cpp) and
-  [`example/corosio/minimal.cpp`](../example/corosio/minimal.cpp) -- the shortest program that
-  resolves a name, once per runtime.
-* [`example/resolve`](../example/resolve) -- a command line with all of it: many names at once,
-  HTTPS records, DNS over TLS, cancellation.
+* A new public symbol goes into [`reference.rst`](reference.rst), as nothing puts it there by itself.
+* Code in the guide comes from `snippets.cpp`, between a `// [name]` and a `// [name-end]` comment,
+  and is shown with `literalinclude`. Only pseudo code is written in place.
+* In a page, names link to the reference with `` :cpp:func:`resolver::resolve` `` and the like, and
+  files of the repository with `` :src:`src/resolver.cpp` ``.
+
+[`Doxyfile.in`](Doxyfile.in) configures Doxygen and [`conf.py`](conf.py) configures Sphinx.

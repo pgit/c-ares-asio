@@ -1,10 +1,10 @@
 #
-# Makes the reference documentation with MrDocs and, from the default branch, publishes it to
-# GitHub Pages. For that to work the repository has to have Pages enabled, with "GitHub Actions"
-# as the source (Settings > Pages).
+# Makes the documentation, the guide and the reference, with Doxygen and Sphinx and, from the
+# default branch, publishes it to GitHub Pages. For that to work the repository has to have Pages
+# enabled, with "GitHub Actions" as the source (Settings > Pages).
 #
 # A pull request only gets as far as making the documentation, which is where a public symbol
-# without a comment shows.
+# without a comment shows, and a reference that goes nowhere.
 #
 name: Docs
 
@@ -21,15 +21,9 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # the release of MrDocs to use, and what its archive for Linux has to hash to -- the same as
-  # in .devcontainer/Dockerfile
-  MRDOCS_RELEASE: 2026.9.29
-  MRDOCS_SHA256: 9d96e42f303046fb0b221aa9071eabccc40b9683e0b7af2b02a929d15476ca6a
-
 jobs:
   build:
-    name: reference
+    name: documentation
     # pinned like in ci.yml, bump it deliberately
     runs-on: &runs_on ubuntu-26.04
 
@@ -40,19 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install MrDocs
+      # the same as in .devcontainer/Dockerfile
+      - name: Install the tools
         run: |
-          curl -sSfL -o /tmp/mrdocs.tar.xz \
-            "https://github.com/cppalliance/mrdocs/releases/download/${MRDOCS_RELEASE}/MrDocs-${MRDOCS_RELEASE}-Linux.tar.xz"
-          echo "${MRDOCS_SHA256}  /tmp/mrdocs.tar.xz" | sha256sum --check
-          mkdir -p /opt/mrdocs
-          tar -xJf /tmp/mrdocs.tar.xz -C /opt/mrdocs --strip-components=1
-          echo /opt/mrdocs/bin >> "$GITHUB_PATH"
+          apt-get update
+          apt-get -y install --no-install-recommends \
+            doxygen python3-sphinx python3-breathe python3-sphinx-rtd-theme
 
       - name: Configure
         run: cmake --preset dev
 
-      - name: Make the reference
+      - name: Make the documentation
         run: cmake --build --preset dev --target docs
 
       - uses: actions/upload-pages-artifact@v5

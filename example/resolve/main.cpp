@@ -631,7 +631,7 @@ Task<std::optional<std::string>> lookupServers(const c_ares_async::Executor& exe
 {
    //
    // Only if there is a name to look up at all. By pointer rather than in a std::optional, which
-   // one of the runtimes does not take a resolver in -- see doc/corosio.md.
+   // one of the runtimes does not take a resolver in -- see doc/corosio.rst.
    //
    std::unique_ptr<c_ares_async::resolver> resolver;
    std::string addresses;
