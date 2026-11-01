@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include <cares_async/resolver.hpp>
+#include <c_ares_async/resolver.hpp>
 
 #include "event_loop.hpp"
 #include "log.hpp"
@@ -22,7 +22,7 @@
 #include <tuple>
 #include <utility>
 
-namespace cares_async
+namespace c_ares_async
 {
 
 // --------------------------------------------------------------------------------------------------
@@ -660,4 +660,4 @@ void resolver::update_timeout()
    });
 }
 
-} // namespace cares_async
+} // namespace c_ares_async

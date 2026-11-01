@@ -42,7 +42,7 @@
 				"testMate.cpp.test.parallelExecutionLimit": 20,
 				"testMate.cpp.test.advancedExecutables": [
 					{
-						"pattern": "${command:cmake.buildDirectory}/test/cares_async_tests",
+						"pattern": "${command:cmake.buildDirectory}/test/c_ares_async_tests",
 						"runTask": {
 							"before": [
 								"CMake: build"

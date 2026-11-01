@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.25...4.4)
 
 project(
-    cares_async
+    c_ares_async
     VERSION 0.1.0
     DESCRIPTION "c-ares name resolution as asynchronous operations, on Boost.Asio or corosio"
     HOMEPAGE_URL "https://github.com/pgit/c-ares-async"
     LANGUAGES CXX)
 
 if (WIN32)
-    message(FATAL_ERROR "cares_async waits on its sockets as POSIX descriptors, which Windows "
+    message(FATAL_ERROR "c_ares_async waits on its sockets as POSIX descriptors, which Windows "
                         "does not have.")
 endif()
 
@@ -27,65 +27,65 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 #
 # The I/O runtime, one per build tree: ASIO (completion tokens, on Boost.Asio) or COROSIO
-# (coroutines only, on capy/corosio). The code tests CARES_ASYNC_ASIO or CARES_ASYNC_COROSIO,
-# exactly one of which is 1, from the generated cares_async/config.hpp. See doc/corosio.md.
+# (coroutines only, on capy/corosio). The code tests C_ARES_ASYNC_ASIO or C_ARES_ASYNC_COROSIO,
+# exactly one of which is 1, from the generated c_ares_async/config.hpp. See doc/corosio.md.
 #
-set(CARES_ASYNC_API "ASIO" CACHE STRING "I/O runtime to build on: ASIO or COROSIO")
-set_property(CACHE CARES_ASYNC_API PROPERTY STRINGS ASIO COROSIO)
+set(C_ARES_ASYNC_API "ASIO" CACHE STRING "I/O runtime to build on: ASIO or COROSIO")
+set_property(CACHE C_ARES_ASYNC_API PROPERTY STRINGS ASIO COROSIO)
 
 #
 # capy and corosio are built from pinned sources as part of a COROSIO build and are not installed,
 # so there is nothing an installed COROSIO build could be linked against.
 #
-if (CARES_ASYNC_API STREQUAL "COROSIO")
-    set(cares_async_install_default OFF)
+if (C_ARES_ASYNC_API STREQUAL "COROSIO")
+    set(c_ares_async_install_default OFF)
 else()
-    set(cares_async_install_default ${PROJECT_IS_TOP_LEVEL})
+    set(c_ares_async_install_default ${PROJECT_IS_TOP_LEVEL})
 endif()
 
 if (PROJECT_IS_TOP_LEVEL AND (NOT DEFINED BUILD_TESTING OR BUILD_TESTING))
-    set(cares_async_tests_default ON)
+    set(c_ares_async_tests_default ON)
 else()
-    set(cares_async_tests_default OFF)
+    set(c_ares_async_tests_default OFF)
 endif()
 
-option(CARES_ASYNC_BUILD_TESTS "Build the tests of cares_async" ${cares_async_tests_default})
-option(CARES_ASYNC_BUILD_EXAMPLES "Build the examples of cares_async" ${PROJECT_IS_TOP_LEVEL})
-option(CARES_ASYNC_BUILD_DOCS "Add the 'docs' target, where MrDocs is there to make them"
+option(C_ARES_ASYNC_BUILD_TESTS "Build the tests of c_ares_async" ${c_ares_async_tests_default})
+option(C_ARES_ASYNC_BUILD_EXAMPLES "Build the examples of c_ares_async" ${PROJECT_IS_TOP_LEVEL})
+option(C_ARES_ASYNC_BUILD_DOCS "Add the 'docs' target, where MrDocs is there to make them"
        ${PROJECT_IS_TOP_LEVEL})
-option(CARES_ASYNC_INSTALL "Generate the install rules of cares_async"
-       ${cares_async_install_default})
+option(C_ARES_ASYNC_INSTALL "Generate the install rules of c_ares_async"
+       ${c_ares_async_install_default})
 
 #
 # c-ares has no DNS over TLS of its own -- see src/tls_transport.hpp. Either library will do: the
 # transport sticks to the OpenSSL API that AWS-LC implements as well, so the choice is made here
 # and nowhere else.
 #
-set(CARES_ASYNC_TLS "OpenSSL" CACHE STRING "TLS library to build against: OpenSSL or AWS-LC")
-set_property(CACHE CARES_ASYNC_TLS PROPERTY STRINGS OpenSSL AWS-LC)
+set(C_ARES_ASYNC_TLS "OpenSSL" CACHE STRING "TLS library to build against: OpenSSL or AWS-LC")
+set_property(CACHE C_ARES_ASYNC_TLS PROPERTY STRINGS OpenSSL AWS-LC)
 
 # --------------------------------------------------------------------------------------------------
 #
 # Dependencies. The versions are kept in variables because the package configuration file asks
 # for the same ones again, on behalf of whoever links the installed library.
 #
-set(CARES_ASYNC_BOOST_VERSION 1.88)
-set(CARES_ASYNC_CARES_VERSION 1.34) # ares_process_fds() was added in 1.34
-set(CARES_ASYNC_OPENSSL_VERSION 3.2) # SSL_get0_group_name() was added in 3.2
+set(C_ARES_ASYNC_BOOST_VERSION 1.88)
+set(C_ARES_ASYNC_CARES_VERSION 1.34) # ares_process_fds() was added in 1.34
+set(C_ARES_ASYNC_OPENSSL_VERSION 3.2) # SSL_get0_group_name() was added in 3.2
 
 find_package(Threads REQUIRED)
-find_package(c-ares ${CARES_ASYNC_CARES_VERSION} CONFIG REQUIRED)
+find_package(c-ares ${C_ARES_ASYNC_CARES_VERSION} CONFIG REQUIRED)
 
-if (CARES_ASYNC_API STREQUAL "ASIO")
-    set(CARES_ASYNC_ASIO 1)
-    set(CARES_ASYNC_COROSIO 0)
-    set(cares_async_runtime_libraries Boost::headers)
-    find_package(Boost ${CARES_ASYNC_BOOST_VERSION} REQUIRED)
-    message(STATUS "cares_async: using I/O runtime Boost.Asio ${Boost_VERSION}")
-elseif (CARES_ASYNC_API STREQUAL "COROSIO")
-    set(CARES_ASYNC_ASIO 0)
-    set(CARES_ASYNC_COROSIO 1)
-    set(cares_async_runtime_libraries Boost::corosio Boost::capy)
+if (C_ARES_ASYNC_API STREQUAL "ASIO")
+    set(C_ARES_ASYNC_ASIO 1)
+    set(C_ARES_ASYNC_COROSIO 0)
+    set(c_ares_async_runtime_libraries Boost::headers)
+    find_package(Boost ${C_ARES_ASYNC_BOOST_VERSION} REQUIRED)
+    message(STATUS "c_ares_async: using I/O runtime Boost.Asio ${Boost_VERSION}")
+elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
+    set(C_ARES_ASYNC_ASIO 0)
+    set(C_ARES_ASYNC_COROSIO 1)
+    set(c_ares_async_runtime_libraries Boost::corosio Boost::capy)
 
     #
     # Pinned: both are pre-release and change their API on 'develop' without notice, so moving a
@@ -109,9 +109,9 @@ elseif (CARES_ASYNC_API STREQUAL "COROSIO")
         GIT_TAG 41d0de18b6e4fa1b397c38a866f2daf52c6c36b5
         EXCLUDE_FROM_ALL)
     FetchContent_MakeAvailable(capy corosio)
-    message(STATUS "cares_async: using I/O runtime capy/corosio")
+    message(STATUS "c_ares_async: using I/O runtime capy/corosio")
 else()
-    message(FATAL_ERROR "CARES_ASYNC_API is '${CARES_ASYNC_API}', expected ASIO or COROSIO")
+    message(FATAL_ERROR "C_ARES_ASYNC_API is '${C_ARES_ASYNC_API}', expected ASIO or COROSIO")
 endif()
 
 #
@@ -124,49 +124,49 @@ if (c-ares_VERSION VERSION_LESS 1.34.7)
                     "that cancelling a lookup can trigger. It is fixed in c-ares 1.34.7.")
 endif()
 
-if (CARES_ASYNC_TLS STREQUAL "OpenSSL")
-    find_package(OpenSSL ${CARES_ASYNC_OPENSSL_VERSION} REQUIRED)
-    set(cares_async_tls_libraries OpenSSL::SSL OpenSSL::Crypto)
-    message(STATUS "cares_async: using TLS library OpenSSL ${OPENSSL_VERSION}")
-elseif (CARES_ASYNC_TLS STREQUAL "AWS-LC")
+if (C_ARES_ASYNC_TLS STREQUAL "OpenSSL")
+    find_package(OpenSSL ${C_ARES_ASYNC_OPENSSL_VERSION} REQUIRED)
+    set(c_ares_async_tls_libraries OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "c_ares_async: using TLS library OpenSSL ${OPENSSL_VERSION}")
+elseif (C_ARES_ASYNC_TLS STREQUAL "AWS-LC")
     # ssl_ROOT says where it is installed, and finds 'crypto' for ssl-config.cmake as well
     find_package(ssl CONFIG REQUIRED)
-    set(cares_async_tls_libraries AWS::ssl)
-    message(STATUS "cares_async: using TLS library AWS-LC (${ssl_DIR})")
+    set(c_ares_async_tls_libraries AWS::ssl)
+    message(STATUS "c_ares_async: using TLS library AWS-LC (${ssl_DIR})")
 else()
-    message(FATAL_ERROR "CARES_ASYNC_TLS is '${CARES_ASYNC_TLS}', expected OpenSSL or AWS-LC")
+    message(FATAL_ERROR "C_ARES_ASYNC_TLS is '${C_ARES_ASYNC_TLS}', expected OpenSSL or AWS-LC")
 endif()
 
 # --------------------------------------------------------------------------------------------------
 #
 # The library. It is static unless BUILD_SHARED_LIBS says otherwise.
 #
-add_library(cares_async)
-add_library(cares_async::cares_async ALIAS cares_async)
+add_library(c_ares_async)
+add_library(c_ares_async::c_ares_async ALIAS c_ares_async)
 
-set(cares_async_generated_include_dir "${CMAKE_CURRENT_BINARY_DIR}/include")
+set(c_ares_async_generated_include_dir "${CMAKE_CURRENT_BINARY_DIR}/include")
 
-configure_file(cmake/version.hpp.in "${cares_async_generated_include_dir}/cares_async/version.hpp"
+configure_file(cmake/version.hpp.in "${c_ares_async_generated_include_dir}/c_ares_async/version.hpp"
                @ONLY)
 
-configure_file(cmake/config.hpp.in "${cares_async_generated_include_dir}/cares_async/config.hpp"
+configure_file(cmake/config.hpp.in "${c_ares_async_generated_include_dir}/c_ares_async/config.hpp"
                @ONLY)
 
 include(GenerateExportHeader)
 generate_export_header(
-    cares_async
-    BASE_NAME CARES_ASYNC
-    EXPORT_FILE_NAME "${cares_async_generated_include_dir}/cares_async/export.hpp")
+    c_ares_async
+    BASE_NAME C_ARES_ASYNC
+    EXPORT_FILE_NAME "${c_ares_async_generated_include_dir}/c_ares_async/export.hpp")
 
 #
 # What belongs to one runtime only lives in asio/ or corosio/, under src/ as well as under
-# include/cares_async/, and only the one of this build is compiled or installed.
+# include/c_ares_async/, and only the one of this build is compiled or installed.
 #
-string(TOLOWER ${CARES_ASYNC_API} cares_async_api_dir)
+string(TOLOWER ${C_ARES_ASYNC_API} c_ares_async_api_dir)
 
 target_sources(
-    cares_async
-    PRIVATE src/${cares_async_api_dir}/event_loop.hpp
+    c_ares_async
+    PRIVATE src/${c_ares_async_api_dir}/event_loop.hpp
             src/event_loop.hpp
             src/log.hpp
             src/resolver.cpp
@@ -177,26 +177,26 @@ target_sources(
             src/tls_transport.cpp
             src/tls_transport.hpp
     PUBLIC FILE_SET HEADERS
-           BASE_DIRS include "${cares_async_generated_include_dir}"
-           FILES include/cares_async.hpp
-                 include/cares_async/${cares_async_api_dir}/runtime.hpp
-                 include/cares_async/error.hpp
-                 include/cares_async/resolver.hpp
-                 include/cares_async/runtime.hpp
-                 "${cares_async_generated_include_dir}/cares_async/config.hpp"
-                 "${cares_async_generated_include_dir}/cares_async/export.hpp"
-                 "${cares_async_generated_include_dir}/cares_async/version.hpp")
+           BASE_DIRS include "${c_ares_async_generated_include_dir}"
+           FILES include/c_ares_async.hpp
+                 include/c_ares_async/${c_ares_async_api_dir}/runtime.hpp
+                 include/c_ares_async/error.hpp
+                 include/c_ares_async/resolver.hpp
+                 include/c_ares_async/runtime.hpp
+                 "${c_ares_async_generated_include_dir}/c_ares_async/config.hpp"
+                 "${c_ares_async_generated_include_dir}/c_ares_async/export.hpp"
+                 "${c_ares_async_generated_include_dir}/c_ares_async/version.hpp")
 
-target_compile_features(cares_async PUBLIC cxx_std_20)
+target_compile_features(c_ares_async PUBLIC cxx_std_20)
 
 # our own sources stay clear of the deprecated ASIO interfaces
-if (CARES_ASYNC_ASIO)
-    target_compile_definitions(cares_async PRIVATE BOOST_ASIO_NO_DEPRECATED)
+if (C_ARES_ASYNC_ASIO)
+    target_compile_definitions(c_ares_async PRIVATE BOOST_ASIO_NO_DEPRECATED)
 endif()
 
-get_target_property(cares_async_type cares_async TYPE)
-if (cares_async_type STREQUAL "STATIC_LIBRARY")
-    target_compile_definitions(cares_async PUBLIC CARES_ASYNC_STATIC_DEFINE)
+get_target_property(c_ares_async_type c_ares_async TYPE)
+if (c_ares_async_type STREQUAL "STATIC_LIBRARY")
+    target_compile_definitions(c_ares_async PUBLIC C_ARES_ASYNC_STATIC_DEFINE)
 endif()
 
 #
@@ -205,15 +205,15 @@ endif()
 # package configuration file has to find them again.
 #
 target_link_libraries(
-    cares_async
-    PUBLIC ${cares_async_runtime_libraries} c-ares::cares
-    PRIVATE ${cares_async_tls_libraries} Threads::Threads)
+    c_ares_async
+    PUBLIC ${c_ares_async_runtime_libraries} c-ares::cares
+    PRIVATE ${c_ares_async_tls_libraries} Threads::Threads)
 
 #
 # No promise of a stable ABI before 1.0, so the minor version is part of the soname until then.
 #
 set_target_properties(
-    cares_async
+    c_ares_async
     PROPERTIES VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                CXX_EXTENSIONS OFF
@@ -223,25 +223,26 @@ set_target_properties(
 
 # --------------------------------------------------------------------------------------------------
 
-if (CARES_ASYNC_INSTALL)
-    if (CARES_ASYNC_COROSIO)
-        message(FATAL_ERROR "CARES_ASYNC_INSTALL does not work with CARES_ASYNC_API=COROSIO: capy "
-                            "and corosio are built from pinned sources here and not installed, so "
-                            "the exported target would point at libraries that are not there.")
+if (C_ARES_ASYNC_INSTALL)
+    if (C_ARES_ASYNC_COROSIO)
+        message(FATAL_ERROR "C_ARES_ASYNC_INSTALL does not work with C_ARES_ASYNC_API=COROSIO: "
+                            "capy and corosio are built from pinned sources here and not "
+                            "installed, so the exported target would point at libraries that are "
+                            "not there.")
     endif()
 
     include(cmake/install.cmake)
 endif()
 
-if (CARES_ASYNC_BUILD_EXAMPLES)
+if (C_ARES_ASYNC_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
 
-if (CARES_ASYNC_BUILD_TESTS)
+if (C_ARES_ASYNC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
 endif()
 
-if (CARES_ASYNC_BUILD_DOCS)
+if (C_ARES_ASYNC_BUILD_DOCS)
     add_subdirectory(doc)
 endif()

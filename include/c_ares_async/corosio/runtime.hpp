@@ -3,7 +3,7 @@
 
 //
 // The runtime layer for capy/corosio: coroutines only, capy::task, capy::any_executor, and
-// std::stop_token where ASIO has cancellation slots. See cares_async/runtime.hpp for what this is;
+// std::stop_token where ASIO has cancellation slots. See c_ares_async/runtime.hpp for what this is;
 // asio/runtime.hpp defines the same names in the same order and has their documentation, and what
 // is said here is what differs.
 //
@@ -26,7 +26,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace cares_async
+namespace c_ares_async
 {
 
 /** A coroutine, as the runtime runs it: `boost::capy::task<T>`.
@@ -288,4 +288,4 @@ auto initiate(Init&& init)
 
 } // namespace detail
 
-} // namespace cares_async
+} // namespace c_ares_async

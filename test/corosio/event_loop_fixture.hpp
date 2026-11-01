@@ -13,7 +13,7 @@
 //
 #pragma once
 
-#include <cares_async/runtime.hpp>
+#include <c_ares_async/runtime.hpp>
 
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/corosio/io_context.hpp>
@@ -52,12 +52,12 @@ inline void PrintTo(const endpoint& ep, std::ostream* os)
 class event_loop_fixture : public testing::Test
 {
 protected:
-   cares_async::Executor executor() { return cares_async::Executor(context.get_executor()); }
+   c_ares_async::Executor executor() { return c_ares_async::Executor(context.get_executor()); }
 
    boost::asio::any_io_executor server_executor() { return server_context.get_executor(); }
 
    template <typename T>
-   T run(cares_async::Task<T> task)
+   T run(c_ares_async::Task<T> task)
    {
       std::optional<T> result;
       std::exception_ptr failed;
@@ -75,7 +75,7 @@ protected:
       return std::move(*result);
    }
 
-   void start(cares_async::Task<void> task)
+   void start(c_ares_async::Task<void> task)
    {
       boost::capy::run_async(
          executor(), []() noexcept {}, [](std::exception_ptr) noexcept {})(std::move(task));
@@ -118,7 +118,7 @@ protected:
       return true;
    }
 
-   static cares_async::Endpoint endpoint(std::string_view address, unsigned short port)
+   static c_ares_async::Endpoint endpoint(std::string_view address, unsigned short port)
    {
       auto [ec, parsed] = boost::corosio::make_ip_address(address);
       if (ec)

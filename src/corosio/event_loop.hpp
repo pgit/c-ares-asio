@@ -7,7 +7,7 @@
 //
 #pragma once
 
-#include <cares_async/runtime.hpp>
+#include <c_ares_async/runtime.hpp>
 
 #include <boost/capy/cond.hpp>
 #include <boost/capy/continuation.hpp>
@@ -39,7 +39,7 @@
 #include <utility>
 #include <variant>
 
-namespace cares_async::detail
+namespace c_ares_async::detail
 {
 
 //
@@ -279,4 +279,4 @@ inline std::optional<Endpoint> make_endpoint(const sockaddr* address, std::size_
    return std::nullopt;
 }
 
-} // namespace cares_async::detail
+} // namespace c_ares_async::detail

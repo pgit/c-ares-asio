@@ -7,18 +7,19 @@
 find_program(MRDOCS_EXECUTABLE mrdocs DOC "MrDocs, which makes the reference documentation")
 
 if (NOT MRDOCS_EXECUTABLE)
-    message(STATUS "cares_async: no 'docs' target, as there is no mrdocs to make them with")
+    message(STATUS "c_ares_async: no 'docs' target, as there is no mrdocs to make them with")
     return()
 endif()
 
 #
 # The reference comes from an ASIO build. The comments it is made of are the same in a COROSIO
-# one -- what differs are the type aliases of the runtime layer, which cares_async/asio/runtime.hpp
+# one -- what differs are the type aliases of the runtime layer, which c_ares_async/asio/runtime.hpp
 # documents for both -- and the include directories of capy and corosio are build-interface
 # generator expressions, which the compilation database below cannot be written with.
 #
-if (CARES_ASYNC_COROSIO)
-    message(STATUS "cares_async: no 'docs' target in a COROSIO build, configure an ASIO one for it")
+if (C_ARES_ASYNC_COROSIO)
+    message(STATUS "c_ares_async: no 'docs' target in a COROSIO build, "
+                   "configure an ASIO one for it")
     return()
 endif()
 
@@ -34,7 +35,7 @@ endif()
 get_target_property(mrdocs_boost_includes Boost::headers INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(mrdocs_cares_includes c-ares::cares INTERFACE_INCLUDE_DIRECTORIES)
 
-set(mrdocs_includes "${PROJECT_SOURCE_DIR}/include" "${cares_async_generated_include_dir}"
+set(mrdocs_includes "${PROJECT_SOURCE_DIR}/include" "${c_ares_async_generated_include_dir}"
                     ${mrdocs_boost_includes} ${mrdocs_cares_includes})
 list(REMOVE_DUPLICATES mrdocs_includes)
 if (CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
@@ -42,7 +43,7 @@ if (CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
 endif()
 
 set(mrdocs_source "${CMAKE_CURRENT_SOURCE_DIR}/mrdocs.cpp")
-set(mrdocs_arguments "${CMAKE_CXX_COMPILER}" -std=c++20 -DCARES_ASYNC_STATIC_DEFINE)
+set(mrdocs_arguments "${CMAKE_CXX_COMPILER}" -std=c++20 -DC_ARES_ASYNC_STATIC_DEFINE)
 foreach (directory IN LISTS mrdocs_includes)
     list(APPEND mrdocs_arguments "-I${directory}")
 endforeach()
@@ -59,15 +60,15 @@ file(
     "  }\n"
     "]\n")
 
-set(CARES_ASYNC_DOCS_DIR "${CMAKE_CURRENT_BINARY_DIR}/html"
+set(C_ARES_ASYNC_DOCS_DIR "${CMAKE_CURRENT_BINARY_DIR}/html"
     CACHE PATH "Where the 'docs' target puts the reference documentation")
 
 add_custom_target(
     docs
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${CARES_ASYNC_DOCS_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${C_ARES_ASYNC_DOCS_DIR}"
     COMMAND
         "${MRDOCS_EXECUTABLE}" "--config=${CMAKE_CURRENT_SOURCE_DIR}/mrdocs.yml"
         "--compilation-database=${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json"
-        "--output=${CARES_ASYNC_DOCS_DIR}"
-    COMMENT "Making the reference documentation in ${CARES_ASYNC_DOCS_DIR}"
+        "--output=${C_ARES_ASYNC_DOCS_DIR}"
+    COMMENT "Making the reference documentation in ${C_ARES_ASYNC_DOCS_DIR}"
     VERBATIM)

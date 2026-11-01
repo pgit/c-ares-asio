@@ -5,12 +5,12 @@ One source tree that builds either as it always did, on Boost.Asio with completi
 a coroutine-only API. The choice is made at configure time:
 
 ```sh
-cmake --preset corosio          # -DCARES_ASYNC_API=COROSIO, in build-corosio/
+cmake --preset corosio          # -DC_ARES_ASYNC_API=COROSIO, in build-corosio/
 cmake --build --preset corosio
 ctest --preset corosio
 ```
 
-`CARES_ASYNC_API` is `ASIO` or `COROSIO` and nothing else is needed: capy and corosio are fetched
+`C_ARES_ASYNC_API` is `ASIO` or `COROSIO` and nothing else is needed: capy and corosio are fetched
 at the commits [`CMakeLists.txt`](../CMakeLists.txt) pins and built as part of the build. A
 COROSIO build needs no Boost at all -- which is also why it has no install rules, see
 [*Constraints*](#constraints).
@@ -40,14 +40,14 @@ That is what the shared tests are written in. On Boost.Asio it is `async_resolve
 
 ## Where the code is
 
-Only three places know which runtime they are in, and they are the ones that say `CARES_ASYNC_ASIO`
-or `CARES_ASYNC_COROSIO` (exactly one of which is 1, from the generated `cares_async/config.hpp`):
+Only three places know which runtime they are in, and they are the ones that say `C_ARES_ASYNC_ASIO`
+or `C_ARES_ASYNC_COROSIO` (exactly one of which is 1, from the generated `c_ares_async/config.hpp`):
 
 | | |
 | --- | --- |
-| [`include/cares_async/runtime.hpp`](../include/cares_async/runtime.hpp) | the vocabulary of the interface, which picks `asio/runtime.hpp` or `corosio/runtime.hpp` |
+| [`include/c_ares_async/runtime.hpp`](../include/c_ares_async/runtime.hpp) | the vocabulary of the interface, which picks `asio/runtime.hpp` or `corosio/runtime.hpp` |
 | [`src/event_loop.hpp`](../src/event_loop.hpp) | the event loop the implementation drives: `Descriptor`, `Timer`, `make_endpoint()`, again one file per runtime |
-| [`include/cares_async/resolver.hpp`](../include/cares_async/resolver.hpp) | the front end: the completion-token operations are ASIO-only |
+| [`include/c_ares_async/resolver.hpp`](../include/c_ares_async/resolver.hpp) | the front end: the completion-token operations are ASIO-only |
 
 The `resolve` example has a small layer of the same kind for what a program needs beyond the
 library -- the event loop itself, the signal handling, the workers of `--concurrency`, the
@@ -119,7 +119,7 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
 * **`corosio::io_context::poll()` does not ask the reactor.** It runs what is ready already; a
   socket that became readable in the meantime is not noticed. Stepping such a context by hand
   takes `run_one_for()`, see [`test/corosio/event_loop_fixture.hpp`](../test/corosio/event_loop_fixture.hpp).
-* **`std::optional<cares_async::resolver>` does not compile.** capy's `any_executor` has a
+* **`std::optional<c_ares_async::resolver>` does not compile.** capy's `any_executor` has a
   converting constructor that is constrained on `std::copy_constructible` only, so asking whether
   a resolver converts to an executor -- which `std::optional` does, through
   `is_trivially_move_constructible` -- instantiates it with the resolver and fails inside. A
@@ -127,7 +127,7 @@ anything, so what ASIO gets to one turn of the event loop later happens here rig
 * **corosio has no output operator for an endpoint.** `endpoint.address()` and `endpoint.port()`
   are there to be printed; the tests teach GoogleTest the same (`PrintTo`).
 * **No install rules.** capy and corosio are built from pinned sources here and not installed, so
-  an exported target would point at libraries that are not there. `CARES_ASYNC_INSTALL` is off by
+  an exported target would point at libraries that are not there. `C_ARES_ASYNC_INSTALL` is off by
   default in a COROSIO build and refuses to be turned on, which also means the two CMake
   consumer tests are ASIO-only.
 * **No `docs` target.** The reference is made from an ASIO build; the comments are the same in

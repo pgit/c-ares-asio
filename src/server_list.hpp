@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace cares_async::detail
+namespace c_ares_async::detail
 {
 
 //
@@ -26,4 +26,4 @@ std::string with_port(std::string_view servers, unsigned port, bool force);
 //
 ares_status_t set_port(ares_channel_t* channel, unsigned port);
 
-} // namespace cares_async::detail
+} // namespace c_ares_async::detail

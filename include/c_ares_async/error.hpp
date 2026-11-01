@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <cares_async/export.hpp>
-#include <cares_async/runtime.hpp>
+#include <c_ares_async/export.hpp>
+#include <c_ares_async/runtime.hpp>
 
-namespace cares_async
+namespace c_ares_async
 {
 
 /** The error category of the c-ares status codes.
@@ -19,14 +19,14 @@ namespace cares_async
 
     @see make_ares_error
  */
-CARES_ASYNC_EXPORT const error_category& ares_category() noexcept;
+C_ARES_ASYNC_EXPORT const error_category& ares_category() noexcept;
 
 /** Makes an error code out of a c-ares status code.
 
     This is what to compare the outcome of an operation against:
 
     @code
-    if (ec == cares_async::make_ares_error(ARES_ENODATA))
+    if (ec == c_ares_async::make_ares_error(ARES_ENODATA))
        ; // the name is there, a record of the type asked for is not
     @endcode
 
@@ -37,6 +37,6 @@ CARES_ASYNC_EXPORT const error_category& ares_category() noexcept;
 
     @return `status` as an error code in @ref ares_category.
  */
-CARES_ASYNC_EXPORT error_code make_ares_error(int status) noexcept;
+C_ARES_ASYNC_EXPORT error_code make_ares_error(int status) noexcept;
 
-} // namespace cares_async
+} // namespace c_ares_async

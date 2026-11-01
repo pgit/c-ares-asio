@@ -1,11 +1,11 @@
-# cares_async
+# c-ares-async
 
 [c-ares](https://c-ares.org/) name resolution as asynchronous operations, on
 [Boost.Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) or on
 capy/corosio.
 
 ASIO's own `ip::tcp::resolver` runs `getaddrinfo()` on an internal thread: one lookup at a time,
-blocking, and with addresses for an answer and nothing else. `cares_async::resolver` has c-ares do
+blocking, and with addresses for an answer and nothing else. `c_ares_async::resolver` has c-ares do
 the asking instead, driven by the event loop of the application -- no thread of its own, any
 number of lookups in flight at once, and more to ask for than addresses:
 
@@ -19,13 +19,13 @@ number of lookups in flight at once, and more to ask for than addresses:
 
 The same library also builds on [capy](https://github.com/cppalliance/capy)/[corosio](https://github.com/cppalliance/corosio)
 instead of Boost.Asio, where the operations are coroutines and nothing else. One build tree is one
-runtime or the other, `-DCARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.md)
+runtime or the other, `-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the corosio runtime](doc/corosio.md)
 for what the two map to.
 
 ## Example
 
 ```cpp
-#include <cares_async.hpp>
+#include <c_ares_async.hpp>
 
 #include <boost/asio.hpp>
 
@@ -35,7 +35,7 @@ namespace asio = boost::asio;
 
 asio::awaitable<void> lookup(std::string host)
 {
-   cares_async::resolver resolver(co_await asio::this_coro::executor);
+   c_ares_async::resolver resolver(co_await asio::this_coro::executor);
 
    const auto [ec, endpoints] =
       co_await resolver.async_resolve(host, "443", asio::as_tuple(asio::use_awaitable));
@@ -60,9 +60,9 @@ tuple -- `resolve()` and `resolve_https()`. On corosio that is all there is, and
 it is capy's:
 
 ```cpp
-cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
+c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string host)
 {
-   cares_async::resolver resolver(executor);
+   c_ares_async::resolver resolver(executor);
 
    const auto [ec, endpoints] = co_await resolver.resolve(host, "443");
 
@@ -100,9 +100,9 @@ names at once, DNS over TLS, cancellation.
 With the library installed, `find_package()` brings the target and everything it depends on:
 
 ```cmake
-find_package(cares_async 0.1 REQUIRED)
+find_package(c_ares_async 0.1 REQUIRED)
 
-target_link_libraries(app PRIVATE cares_async::cares_async)
+target_link_libraries(app PRIVATE c_ares_async::c_ares_async)
 ```
 
 The target has the same name where the sources are part of the build instead, through
@@ -112,12 +112,12 @@ The target has the same name where the sources are part of the build instead, th
 include(FetchContent)
 
 FetchContent_Declare(
-    cares_async
+    c_ares_async
     GIT_REPOSITORY https://github.com/pgit/c-ares-async.git
     GIT_TAG <tag or commit>)
-FetchContent_MakeAvailable(cares_async)
+FetchContent_MakeAvailable(c_ares_async)
 
-target_link_libraries(app PRIVATE cares_async::cares_async)
+target_link_libraries(app PRIVATE c_ares_async::c_ares_async)
 ```
 
 Either way the target asks for C++20 and brings the include paths of Boost and c-ares with it,
@@ -126,13 +126,13 @@ sight: no header of the library includes one of its.
 
 | Option | Default | |
 | --- | --- | --- |
-| `CARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.md](doc/corosio.md). |
-| `CARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
+| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` (Boost.Asio) or `COROSIO` (capy/corosio), see [doc/corosio.md](doc/corosio.md). |
+| `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
 | `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
-| `CARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
-| `CARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
-| `CARES_ASYNC_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
-| `CARES_ASYNC_INSTALL` | top-level only | Generates the install rules. Off, and refused, in a COROSIO build. |
+| `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
+| `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
+| `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Adds the `docs` target, where there is a `mrdocs` to make them with. |
+| `C_ARES_ASYNC_INSTALL` | top-level only | Generates the install rules. Off, and refused, in a COROSIO build. |
 
 ## Building, testing, installing
 
@@ -174,7 +174,7 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 ## Documentation
 
-* The reference is made from the comments in [`include/cares_async`](include/cares_async) by
+* The reference is made from the comments in [`include/c_ares_async`](include/c_ares_async) by
   [MrDocs](https://www.mrdocs.com): `cmake --build build --target docs`, see [doc](doc/README.md).
 * [How the integration works](doc/design.md): c-ares in an event loop.
 * [The corosio runtime](doc/corosio.md): the second runtime, and what porting to it found.
@@ -185,7 +185,7 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 * **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
-  then completes with `cares_async::errors::canceled` -- `operation_aborted` on Boost.Asio,
+  then completes with `c_ares_async::errors::canceled` -- `operation_aborted` on Boost.Asio,
   `capy::error::canceled` on corosio.
 * **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
   executor a strand and start the lookups from inside it.
@@ -194,7 +194,7 @@ source tree -- which is what keeps the two CMake snippets above true.
 * **The library does not log.** What it would have logged goes to the function given to
   `resolver::set_logger()`, which is where the reason for a failed TLS handshake is to be found.
 * **There is no promise of a stable interface before 1.0.** The minor version is part of the name
-  of the shared library until then, and `find_package(cares_async 0.1)` does not accept 0.2.
+  of the shared library until then, and `find_package(c_ares_async 0.1)` does not accept 0.2.
 
 ## License
 

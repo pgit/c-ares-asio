@@ -3,7 +3,7 @@
 
 //
 // What this program needs of its I/O runtime beyond what the library's own runtime layer
-// (cares_async/runtime.hpp) gives it:
+// (c_ares_async/runtime.hpp) gives it:
 //
 //    Context                 -- the event loop to run everything on
 //    run_main()              -- spawn the lookups, cancel them on a signal, run the loop
@@ -17,9 +17,9 @@
 //
 #pragma once
 
-#include <cares_async/runtime.hpp>
+#include <c_ares_async/runtime.hpp>
 
-#if CARES_ASYNC_COROSIO
+#if C_ARES_ASYNC_COROSIO
 #include "corosio/runtime.hpp"
 #else
 #include "asio/runtime.hpp"

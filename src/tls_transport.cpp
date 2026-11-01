@@ -26,7 +26,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace cares_async::detail
+namespace c_ares_async::detail
 {
 
 namespace
@@ -534,4 +534,4 @@ const struct ares_socket_functions_ex& tls_transport::functions()
    return table;
 }
 
-} // namespace cares_async::detail
+} // namespace c_ares_async::detail

@@ -7,7 +7,7 @@
 #include <format>
 #include <memory>
 
-namespace cares_async::detail
+namespace c_ares_async::detail
 {
 
 namespace
@@ -97,4 +97,4 @@ ares_status_t set_port(ares_channel_t* channel, unsigned port)
    return static_cast<ares_status_t>(ares_set_servers_csv(channel, moved.c_str()));
 }
 
-} // namespace cares_async::detail
+} // namespace c_ares_async::detail

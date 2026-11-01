@@ -13,8 +13,8 @@
 #include <tuple>
 #include <utility>
 
-using cares_async::error_code;
-using cares_async::make_ares_error;
+using c_ares_async::error_code;
+using c_ares_async::make_ares_error;
 using testing::ElementsAre;
 using testing::IsEmpty;
 using testing::UnorderedElementsAre;
@@ -155,7 +155,7 @@ TEST_F(Resolver, GivesUpOnAServerThatDoesNotAnswer)
    // set up -- so this takes a resolver of its own.
    //
    ASSERT_EQ(::setenv("RES_OPTIONS", "timeout:1 attempts:1", 1), 0);
-   cares_async::resolver impatient(executor());
+   c_ares_async::resolver impatient(executor());
    ASSERT_EQ(::unsetenv("RES_OPTIONS"), 0);
 
    ASSERT_FALSE(impatient.set_servers(server.address()));
@@ -194,9 +194,9 @@ TEST_F(Resolver, KeepsManyLookupsApart)
    for (int i = 0; i < count; ++i)
       server.add_address(std::format("host{}.example.test", i), std::format("192.0.2.{}", i));
 
-   std::map<int, std::tuple<error_code, cares_async::resolver::results_type>> results;
+   std::map<int, std::tuple<error_code, c_ares_async::resolver::results_type>> results;
    for (int i = 0; i < count; ++i)
-      start([](cares_async::resolver& resolver, auto& results, int i) -> cares_async::Task<void> {
+      start([](c_ares_async::resolver& resolver, auto& results, int i) -> c_ares_async::Task<void> {
          results[i] = co_await resolver.resolve(std::format("host{}.example.test", i), "443");
       }(resolver, results, i));
 
@@ -264,7 +264,7 @@ TEST_F(Resolver, AsksTheServerItWasToldLast)
 
 // --------------------------------------------------------------------------------------------------
 
-using cares_async::log_level;
+using c_ares_async::log_level;
 using testing::Contains;
 using testing::HasSubstr;
 using testing::Pair;

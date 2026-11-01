@@ -10,7 +10,7 @@
 #include "event_loop_fixture.hpp"
 #include "fake_dns_server.hpp"
 
-#include <cares_async/resolver.hpp>
+#include <c_ares_async/resolver.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -41,5 +41,5 @@ protected:
    // In this order, as the resolver and the server both hang on to their loops.
    //
    fake_dns_server server{server_executor()};
-   cares_async::resolver resolver{executor()};
+   c_ares_async::resolver resolver{executor()};
 };

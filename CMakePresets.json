@@ -30,7 +30,7 @@
             "hidden": true,
             "description": "AWS-LC as the TLS library, where the devcontainer has it",
             "cacheVariables": {
-                "CARES_ASYNC_TLS": "AWS-LC",
+                "C_ARES_ASYNC_TLS": "AWS-LC",
                 "ssl_ROOT": "/opt/boringssl"
             }
         },
@@ -93,7 +93,7 @@
             "binaryDir": "${sourceDir}/build-openssl",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CARES_ASYNC_TLS": "OpenSSL",
+                "C_ARES_ASYNC_TLS": "OpenSSL",
                 "BUILD_SHARED_LIBS": "ON"
             }
         },
@@ -108,7 +108,7 @@
             "binaryDir": "${sourceDir}/build-corosio",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CARES_ASYNC_API": "COROSIO"
+                "C_ARES_ASYNC_API": "COROSIO"
             }
         },
         {
@@ -121,7 +121,7 @@
             "binaryDir": "${sourceDir}/build-corosio-asan",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CARES_ASYNC_API": "COROSIO",
+                "C_ARES_ASYNC_API": "COROSIO",
                 "CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wall -Wextra -Wno-missing-designated-field-initializers -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
             }
         },
@@ -135,7 +135,7 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_CXX_COMPILER": "g++",
                 "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wno-missing-field-initializers",
-                "CARES_ASYNC_TLS": "OpenSSL"
+                "C_ARES_ASYNC_TLS": "OpenSSL"
             }
         }
     ],

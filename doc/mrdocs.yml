@@ -8,9 +8,9 @@ source-root: ..
 input:
   - ../include
 include-symbols:
-  - 'cares_async::**'
+  - 'c_ares_async::**'
 exclude-symbols:
-  - 'cares_async::detail::**'
+  - 'c_ares_async::detail::**'
 
 # the export header and the version header are made by CMake, in the build directory
 includes:

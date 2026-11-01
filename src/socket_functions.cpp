@@ -11,7 +11,7 @@
 
 #include <cerrno>
 
-namespace cares_async::detail
+namespace c_ares_async::detail
 {
 
 int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
@@ -132,4 +132,4 @@ ares_status_t install_socket_functions(ares_channel_t* channel)
    return ares_set_socket_functions_ex(channel, &functions(), nullptr);
 }
 
-} // namespace cares_async::detail
+} // namespace c_ares_async::detail

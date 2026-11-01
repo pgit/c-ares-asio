@@ -7,7 +7,7 @@
 //
 //    minimal [host]
 //
-#include <cares_async.hpp>
+#include <c_ares_async.hpp>
 
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/corosio/io_context.hpp>
@@ -17,9 +17,9 @@
 #include <iostream>
 #include <string>
 
-cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
+c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string host)
 {
-   cares_async::resolver resolver(executor);
+   c_ares_async::resolver resolver(executor);
 
    const auto [ec, endpoints] = co_await resolver.resolve(host, "443");
 
@@ -30,7 +30,7 @@ cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
    // corosio has no output operator for an endpoint, so here is one: the address, in brackets
    // where it is an IPv6 one, and the port behind it.
    //
-   const auto text = [](const cares_async::Endpoint& endpoint) {
+   const auto text = [](const c_ares_async::Endpoint& endpoint) {
       return endpoint.address().is_v6()
                 ? std::format("[{}]:{}", endpoint.address().to_string(), endpoint.port())
                 : std::format("{}:{}", endpoint.address().to_string(), endpoint.port());
@@ -44,7 +44,7 @@ cares_async::Task<void> lookup(cares_async::Executor executor, std::string host)
    //
    const auto [https_ec, records] = co_await resolver.resolve_https(host);
 
-   if (https_ec && https_ec != cares_async::make_ares_error(ARES_ENODATA))
+   if (https_ec && https_ec != c_ares_async::make_ares_error(ARES_ENODATA))
       std::cerr << host << ": HTTPS: " << https_ec.message() << '\n';
 
    for (const auto& record : records)
@@ -66,7 +66,7 @@ int main(int argc, char* argv[])
    // capy::this_coro::executor yields does not own its context, and the resolver keeps the one
    // it was given.
    //
-   const cares_async::Executor executor(context.get_executor());
+   const c_ares_async::Executor executor(context.get_executor());
    boost::capy::run_async(
       executor, []() noexcept {},
       [](std::exception_ptr) noexcept {})(lookup(executor, argc > 1 ? argv[1] : "example.com"));

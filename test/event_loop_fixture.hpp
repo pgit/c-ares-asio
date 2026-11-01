@@ -8,9 +8,9 @@
 //
 #pragma once
 
-#include <cares_async/runtime.hpp>
+#include <c_ares_async/runtime.hpp>
 
-#if CARES_ASYNC_COROSIO
+#if C_ARES_ASYNC_COROSIO
 #include "corosio/event_loop_fixture.hpp"
 #else
 #include "asio/event_loop_fixture.hpp"

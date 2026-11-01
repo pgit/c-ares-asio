@@ -19,10 +19,10 @@
 
 #include <unistd.h>
 
-using cares_async::error_code;
-using cares_async::log_level;
-using cares_async::make_ares_error;
-using cares_async::tls_options;
+using c_ares_async::error_code;
+using c_ares_async::log_level;
+using c_ares_async::make_ares_error;
+using c_ares_async::tls_options;
 using testing::Contains;
 using testing::ElementsAre;
 using testing::HasSubstr;
@@ -65,7 +65,7 @@ protected:
    //
    void trust_the_server()
    {
-      trusted = testing::TempDir() + "cares_async_test_" + std::to_string(::getpid()) + ".pem";
+      trusted = testing::TempDir() + "c_ares_async_test_" + std::to_string(::getpid()) + ".pem";
       std::ofstream(trusted) << certificate.certificate_pem;
       ASSERT_EQ(::setenv("SSL_CERT_FILE", trusted.c_str(), 1), 0);
    }
@@ -75,7 +75,7 @@ protected:
    //
    void make_resolver(const tls_options& tls)
    {
-      resolver = std::make_unique<cares_async::resolver>(executor(), tls);
+      resolver = std::make_unique<c_ares_async::resolver>(executor(), tls);
       resolver->set_logger([this](log_level level, std::string_view message) {
          messages.emplace_back(level, message);
       });
@@ -94,7 +94,7 @@ protected:
    // an executor -- a question capy's any_executor answers by failing to compile, see
    // doc/corosio.md.
    //
-   std::unique_ptr<cares_async::resolver> resolver;
+   std::unique_ptr<c_ares_async::resolver> resolver;
 
    std::vector<std::pair<log_level, std::string>> messages;
    std::string trusted;
@@ -220,14 +220,14 @@ TEST_F(DnsOverTls, SendsAddressAndHttpsQueriesDownOneConnection)
    // Both in flight at the same time, so that it is one connection carrying the two of them
    // rather than one after the other.
    //
-   std::optional<std::tuple<error_code, cares_async::resolver::results_type>> addresses;
-   std::optional<std::tuple<error_code, cares_async::resolver::https_results_type>> https;
+   std::optional<std::tuple<error_code, c_ares_async::resolver::results_type>> addresses;
+   std::optional<std::tuple<error_code, c_ares_async::resolver::https_results_type>> https;
 
-   start([](cares_async::resolver& resolver, auto& addresses) -> cares_async::Task<void> {
+   start([](c_ares_async::resolver& resolver, auto& addresses) -> c_ares_async::Task<void> {
       addresses = co_await resolver.resolve("www.example.test", "443");
    }(*resolver, addresses));
 
-   start([](cares_async::resolver& resolver, auto& https) -> cares_async::Task<void> {
+   start([](c_ares_async::resolver& resolver, auto& https) -> c_ares_async::Task<void> {
       https = co_await resolver.resolve_https("www.example.test");
    }(*resolver, https));
 
