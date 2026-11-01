@@ -118,7 +118,9 @@ inline cares_async::Task<bool> cancelled()
 class native_resolver
 {
 public:
-   explicit native_resolver(const cares_async::Executor& executor) : resolver_(executor.context()) {}
+   explicit native_resolver(const cares_async::Executor& executor) : resolver_(executor.context())
+   {
+   }
 
    static constexpr std::string_view name = "the corosio resolver";
 

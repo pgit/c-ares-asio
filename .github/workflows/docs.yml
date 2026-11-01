@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: docker.io/psedoc/anyhttp:0.30
+      image: docker.io/psedoc/anyhttp:0.31
       options: --user root
 
     steps:
