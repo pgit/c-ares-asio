@@ -7,6 +7,9 @@
 # devcontainer passes here and the other way round. The tests need no network: they ask a DNS
 # server of their own, see test/fake_dns_server.hpp.
 #
+# The runner image is pinned rather than ubuntu-latest, like in anyhttp: everything else is pinned
+# down to the container, and the host is what is left to change under us. Bump it deliberately.
+#
 name: CI
 
 on:
@@ -25,7 +28,7 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.preset }}
-    runs-on: ubuntu-latest
+    runs-on: &runs_on ubuntu-26.04
 
     container:
       image: docker.io/psedoc/anyhttp:0.31
@@ -52,7 +55,7 @@ jobs:
 
   format:
     name: clang-format
-    runs-on: ubuntu-latest
+    runs-on: *runs_on
 
     container:
       image: docker.io/psedoc/anyhttp:0.31
